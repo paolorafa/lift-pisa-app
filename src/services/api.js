@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ⚠️ IMPORTANTE: Questo è il TUO URL dello script Google Apps
-const API_URL = 'https://script.google.com/macros/s/AKfycbx6Z1ALzqmNMFnnGzbvDiUQNFABd3p6gnOsANhiMzRrH9enAtOnIPxZkNjosfH3SuFtfA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxcVaz2ior8uGiabNWVekpZ7905jCKlgff11XuXQGSa535Qeh2useIycWPGfgNOleP7/exec';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;

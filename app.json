@@ -25,6 +25,17 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "publicPath": "/prenotazioni/"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8290ebae-c349-49a8-95d6-bc77d584d877"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8290ebae-c349-49a8-95d6-bc77d584d877"
     }
   }
 }
