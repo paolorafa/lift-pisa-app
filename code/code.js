@@ -520,7 +520,9 @@ function verificaCliente(email, clientId = null) {
       asiExpiryString: '',
       message: '',
       paymentStatus: paymentStatusRaw,
-      isPaid: isPaid
+      isPaid: isPaid,
+      abbonamentoExpired: false,
+      abbonamentoExpiryString: '',
     };
     
     // Validazione certificato
@@ -571,6 +573,31 @@ function verificaCliente(email, clientId = null) {
     } else {
       clientData.asiExpired = true;
       clientData.asiExpiryString = 'Non presente';
+    }
+
+       // Validazione Scadenza Abbonamento
+    if(clientRow[11]) {
+      try {
+        const abbonamentoExpiryDate = new Date(clientRow[11]);
+        
+        if(isNaN(abbonamentoExpiryDate.getTime())) {
+          clientData.abbonamentoExpired = true;
+          clientData.abbonamentoExpiryString = 'Data non valida';
+        } else {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          abbonamentoExpiryDate.setHours(0, 0, 0, 0);
+          
+          clientData.abbonamentoExpiryString = formatDate(abbonamentoExpiryDate);
+          clientData.abbonamentoExpired = abbonamentoExpiryDate < today;
+        }
+      } catch(e) {
+        clientData.abbonamentoExpired = true;
+        clientData.abbonamentoExpiryString = 'Errore lettura data';
+      }
+    } else {
+      clientData.abbonamentoExpired = true;
+      clientData.abbonamentoExpiryString = 'Non presente';
     }
     
     const freqIndex = findFrequencyColumn(headers);
