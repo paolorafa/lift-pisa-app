@@ -16,16 +16,14 @@ import { borderRadius, colors, spacing, typography } from '../styles/theme';
 export default function HomeScreen({ navigation, route }) {
   const [userData, setUserData] = useState(route.params?.userData || null);
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(!route.params?.userData); // Loading se non ci sono dati
+  const [loading, setLoading] = useState(!route.params?.userData);
 
-  // Carica dati automaticamente se non ci sono
   const loadUserData = useCallback(async () => {
     try {
       setLoading(true);
       const { email, code } = await ApiService.getSavedCredentials();
       
       if (!email || !code) {
-        // Nessuna credenziale salvata, torna al login
         navigation.replace('Login');
         return;
       }
@@ -54,7 +52,6 @@ export default function HomeScreen({ navigation, route }) {
       setUserData(route.params.userData);
       setLoading(false);
     } else {
-      // Nessun dato nei parametri, carica dal server
       loadUserData();
     }
   }, [route.params?.userData, loadUserData]);
@@ -123,7 +120,6 @@ export default function HomeScreen({ navigation, route }) {
     );
   };
 
-  // Loading screen
   if (loading) {
     return (
       <View style={[styles.container, styles.centerContent]}>
@@ -133,7 +129,6 @@ export default function HomeScreen({ navigation, route }) {
     );
   }
 
-  // Error screen
   if (!userData) {
     return (
       <View style={styles.container}>
@@ -173,34 +168,41 @@ export default function HomeScreen({ navigation, route }) {
         Ciao, {userData.nome || 'Utente'}!
       </Text>
 
-      {/* Status Cards */}
+      {/* Status Cards - Griglia 2x2 */}
       <View style={styles.statusGrid}>
+        {/* Prima riga */}
         {/* Abbonamento */}
         <View style={[styles.statusCard, styles.halfCard]}>
-          <MaterialCommunityIcons name="credit-card" size={28} color={colors.textPrimary} />
-          <Text style={styles.statusLabel}>Stato Abbonamento</Text>
+          <MaterialCommunityIcons 
+            name="credit-card" 
+            size={24} 
+            color={userData.abbonamentoExpired ? colors.error : colors.textPrimary} 
+          />
+          <Text style={styles.statusLabel}>Abbonamento</Text>
           <Text
             style={[
               styles.statusValue,
-              { color: userData.isPaid ? colors.success : colors.error },
+              { color: userData.abbonamentoExpired ? colors.error : colors.success },
+              styles.statusValueSmall,
             ]}
           >
-            {userData.isPaid ? 'Attivo' : 'Non Pagato'}
+            {userData.abbonamentoExpired ? 'Scad. ' : 'Scad. '}
+            {userData.abbonamentoExpiryString || 'N/A'}
           </Text>
         </View>
 
-        {/* Certificato */}
+        {/* Certificato Medico */}
         <View style={[styles.statusCard, styles.halfCard]}>
           <MaterialCommunityIcons
             name="file-document"
-            size={28}
-            color={userData.certificateExpired ? colors.warning : colors.textPrimary}
+            size={24}
+            color={userData.certificateExpired ? colors.error : colors.textPrimary}
           />
-          <Text style={styles.statusLabel}>Certificato Medico</Text>
+          <Text style={styles.statusLabel}>Certificato</Text>
           <Text
             style={[
               styles.statusValue,
-              { color: userData.certificateExpired ? colors.error : colors.textSecondary },
+              { color: userData.certificateExpired ? colors.error : colors.success },
               styles.statusValueSmall,
             ]}
           >
@@ -209,13 +211,34 @@ export default function HomeScreen({ navigation, route }) {
           </Text>
         </View>
 
+        {/* Seconda riga */}
+        {/* Tessera ASI */}
+        <View style={[styles.statusCard, styles.halfCard]}>
+          <MaterialCommunityIcons
+            name="card-account-details"
+            size={24}
+            color={userData.asiExpired ? colors.error : colors.textPrimary}
+          />
+          <Text style={styles.statusLabel}>Tessera ASI</Text>
+          <Text
+            style={[
+              styles.statusValue,
+              { color: userData.asiExpired ? colors.error : colors.success },
+              styles.statusValueSmall,
+            ]}
+          >
+            {userData.asiExpired ? 'Scad. ' : 'Scad. '}
+            {userData.asiExpiryString || 'N/A'}
+          </Text>
+        </View>
+
         {/* Prenotazioni questa settimana */}
-        <View style={styles.statusCard}>
-          <MaterialCommunityIcons name="calendar-check" size={28} color={colors.textPrimary} />
+        <View style={[styles.statusCard, styles.halfCard]}>
+          <MaterialCommunityIcons name="calendar-check" size={24} color={colors.textPrimary} />
           <Text style={styles.statusLabel}>Prenotazioni</Text>
-          <Text style={styles.statusValue}>
+          <Text style={[styles.statusValue, styles.statusValueSmall]}>
             {userData.weeklyBookings || 0}
-            {userData.frequenza !== 'Open' && `/${userData.frequenza}`} effettuate
+            {userData.frequenza !== 'Open' && `/${userData.frequenza}`}
           </Text>
         </View>
       </View>
@@ -322,8 +345,8 @@ const styles = StyleSheet.create({
   statusGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
-    gap: spacing.md,
   },
   statusCard: {
     backgroundColor: colors.cardBackground,
@@ -331,7 +354,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    width: '100%',
+    marginBottom: spacing.md,
   },
   halfCard: {
     width: '48%',
