@@ -9,9 +9,26 @@ import BookingsScreen from '../screens/BookingsScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import SlotsScreen from '../screens/SlotsScreen';
+import ScegliDataScreen from '../screens/ScegliDataScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const BookingStack = createNativeStackNavigator();
+
+// Stack per le prenotazioni (Prenota → Scegli Data → Scegli Slot)
+function BookingStackScreen() {
+  return (
+    <BookingStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    >
+      <BookingStack.Screen name="ScegliData" component={ScegliDataScreen} />
+      <BookingStack.Screen name="ScegliSlot" component={SlotsScreen} />
+    </BookingStack.Navigator>
+  );
+}
 
 function MainTabs() {
   return (
@@ -46,7 +63,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Slots"
-        component={SlotsScreen}
+        component={BookingStackScreen}
         options={{
           tabBarLabel: 'Prenota',
           tabBarIcon: ({ color, size }) => (

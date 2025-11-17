@@ -13,39 +13,24 @@ import {
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
-const DAYS = [
-  { id: 'Lunedì', short: 'Lun', num: 1 },
-  { id: 'Martedì', short: 'Mar', num: 2 },
-  { id: 'Mercoledì', short: 'Mer', num: 3 },
-  { id: 'Giovedì', short: 'Gio', num: 4 },
-  { id: 'Venerdì', short: 'Ven', num: 5 },
-  { id: 'Sabato', short: 'Sab', num: 6 },
-  { id: 'Domenica', short: 'Dom', num: 0 },
-];
-
 export default function SlotsScreen({ navigation, route }) {
-  const userData = route.params?.userData;
+  const { giorno, data, dataFormattata } = route.params || {};
   
   const [slots, setSlots] = useState([]);
   const [filteredSlots, setFilteredSlots] = useState([]);
-  const [selectedDay, setSelectedDay] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [booking, setBooking] = useState(null);
 
   useEffect(() => {
     loadSlots();
-    // Imposta giorno corrente come default
-    const today = new Date().getDay();
-    const currentDay = DAYS.find(d => d.num === today);
-    if (currentDay) {
-      setSelectedDay(currentDay.id);
-    }
   }, []);
 
   useEffect(() => {
-    filterSlotsByDay();
-  }, [selectedDay, slots]);
+    if (giorno && slots.length > 0) {
+      filterSlotsByDay();
+    }
+  }, [giorno, slots]);
 
   const loadSlots = async () => {
     try {
@@ -66,11 +51,11 @@ export default function SlotsScreen({ navigation, route }) {
   };
 
   const filterSlotsByDay = () => {
-    if (!selectedDay) {
+    if (!giorno) {
       setFilteredSlots(slots);
       return;
     }
-    const filtered = slots.filter(slot => slot.Giorno === selectedDay);
+    const filtered = slots.filter(slot => slot.Giorno === giorno);
     setFilteredSlots(filtered);
   };
 
@@ -106,8 +91,8 @@ export default function SlotsScreen({ navigation, route }) {
             {
               text: 'OK',
               onPress: () => {
-                loadSlots(); // Ricarica slot
-                navigation.navigate('Home'); // Torna alla home
+                // Torna alla home (attraverso il tab)
+                navigation.navigate('Home');
               },
             },
           ]
@@ -167,23 +152,6 @@ export default function SlotsScreen({ navigation, route }) {
     );
   };
 
-  const renderDayFilter = ({ item }) => {
-    const isSelected = selectedDay === item.id;
-    
-    return (
-      <TouchableOpacity
-        style={[styles.dayButton, isSelected && styles.dayButtonActive]}
-        onPress={() => setSelectedDay(item.id)}
-      >
-        <Text
-          style={[styles.dayButtonText, isSelected && styles.dayButtonTextActive]}
-        >
-          {item.short} {item.num}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
   if (loading) {
     return (
       <View style={[styles.container, styles.centerContent]}>
@@ -200,20 +168,17 @@ export default function SlotsScreen({ navigation, route }) {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <MaterialCommunityIcons name="arrow-left" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Prenota il tuo Slot</Text>
+        <Text style={styles.headerTitle}>Scegli lo Slot</Text>
         <View style={{ width: 28 }} />
       </View>
 
-      {/* Day Filter */}
-      <FlatList
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        data={DAYS}
-        renderItem={renderDayFilter}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.dayFilterContainer}
-        style={styles.dayFilter}
-      />
+      {/* Data selezionata */}
+      {dataFormattata && (
+        <View style={styles.dateBox}>
+          <MaterialCommunityIcons name="calendar-check" size={24} color={colors.primary} />
+          <Text style={styles.dateText}>{dataFormattata}</Text>
+        </View>
+      )}
 
       {/* Slots List */}
       <FlatList
@@ -255,33 +220,23 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...typography.h2,
   },
-  dayFilter: {
-    maxHeight: 60,
+  dateBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.cardBackground,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
-  },
-  dayFilterContainer: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-  },
-  dayButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
     borderRadius: borderRadius.md,
-    backgroundColor: colors.backgroundLight,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
-  dayButtonActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  dayButtonText: {
+  dateText: {
     ...typography.body,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  dayButtonTextActive: {
     color: colors.textPrimary,
+    marginLeft: spacing.sm,
+    textTransform: 'capitalize',
+    fontWeight: '600',
   },
   slotsContainer: {
     padding: spacing.lg,
