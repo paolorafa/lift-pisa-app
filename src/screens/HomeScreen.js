@@ -17,6 +17,7 @@ export default function HomeScreen({ navigation, route }) {
   const [userData, setUserData] = useState(route.params?.userData || null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(!route.params?.userData);
+  const [communications, setCommunications] = useState([]);
 
   const loadUserData = useCallback(async () => {
     try {
@@ -34,6 +35,11 @@ export default function HomeScreen({ navigation, route }) {
       if (freshData.found) {
         setUserData(freshData);
         console.log('✅ Dati utente caricati:', freshData.nome, freshData.cognome);
+        
+        // Carica comunicazioni
+        const comms = await ApiService.getCommunications();
+        setCommunications(comms);
+        console.log('✅ Comunicazioni caricate:', comms.length);
       } else {
         Alert.alert('Errore', 'Impossibile caricare i dati utente');
         navigation.replace('Login');
@@ -51,6 +57,8 @@ export default function HomeScreen({ navigation, route }) {
     if (route.params?.userData) {
       setUserData(route.params.userData);
       setLoading(false);
+      // Carica comunque le comunicazioni
+      ApiService.getCommunications().then(setCommunications);
     } else {
       loadUserData();
     }
@@ -65,6 +73,10 @@ export default function HomeScreen({ navigation, route }) {
         if (freshData.found) {
           setUserData(freshData);
         }
+        
+        // Ricarica comunicazioni
+        const comms = await ApiService.getCommunications();
+        setCommunications(comms);
       }
     } catch (error) {
       console.error('Error refreshing:', error);
@@ -120,6 +132,33 @@ export default function HomeScreen({ navigation, route }) {
     );
   };
 
+  const getCommunicationStyle = (tipo) => {
+    switch(tipo) {
+      case 'warning':
+        return {
+          icon: 'alert',
+          bgColor: 'rgba(251, 191, 36, 0.1)',
+          borderColor: colors.warning,
+          iconColor: colors.warning,
+        };
+      case 'important':
+        return {
+          icon: 'alert-circle',
+          bgColor: 'rgba(239, 68, 68, 0.1)',
+          borderColor: colors.error,
+          iconColor: colors.error,
+        };
+      case 'info':
+      default:
+        return {
+          icon: 'information',
+          bgColor: 'rgba(59, 157, 255, 0.1)',
+          borderColor: colors.primary,
+          iconColor: colors.primary,
+        };
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.centerContent]}>
@@ -149,6 +188,7 @@ export default function HomeScreen({ navigation, route }) {
   return (
     <ScrollView
       style={styles.container}
+      contentContainerStyle={styles.scrollContent}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
@@ -168,9 +208,39 @@ export default function HomeScreen({ navigation, route }) {
         Ciao, {userData.nome || 'Utente'}!
       </Text>
 
+      {/* Comunicazioni */}
+      {communications.length > 0 && (
+        <View style={styles.communicationsSection}>
+          {communications.map((comm) => {
+            const style = getCommunicationStyle(comm.tipo);
+            return (
+              <View
+                key={comm.id}
+                style={[
+                  styles.communicationCard,
+                  {
+                    backgroundColor: style.bgColor,
+                    borderColor: style.borderColor,
+                  }
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={style.icon}
+                  size={24}
+                  color={style.iconColor}
+                />
+                <View style={styles.communicationContent}>
+                  <Text style={styles.communicationTitle}>{comm.titolo}</Text>
+                  <Text style={styles.communicationMessage}>{comm.messaggio}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {/* Status Cards - Griglia 2x2 */}
       <View style={styles.statusGrid}>
-        {/* Prima riga */}
         {/* Abbonamento */}
         <View style={[styles.statusCard, styles.halfCard]}>
           <MaterialCommunityIcons 
@@ -211,7 +281,6 @@ export default function HomeScreen({ navigation, route }) {
           </Text>
         </View>
 
-        {/* Seconda riga */}
         {/* Tessera ASI */}
         <View style={[styles.statusCard, styles.halfCard]}>
           <MaterialCommunityIcons
@@ -232,7 +301,7 @@ export default function HomeScreen({ navigation, route }) {
           </Text>
         </View>
 
-        {/* Prenotazioni questa settimana */}
+        {/* Prenotazioni */}
         <View style={[styles.statusCard, styles.halfCard]}>
           <MaterialCommunityIcons name="calendar-check" size={24} color={colors.textPrimary} />
           <Text style={styles.statusLabel}>Prenotazioni</Text>
@@ -300,7 +369,7 @@ export default function HomeScreen({ navigation, route }) {
         </TouchableOpacity>
       )}
 
-      {/* Warning se non può prenotare */}
+      {/* Warning */}
       {(!userData.isPaid || userData.certificateExpired) && (
         <View style={styles.warningBox}>
           <MaterialCommunityIcons name="alert-circle" size={24} color={colors.warning} />
@@ -319,6 +388,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollContent: {
+    paddingBottom: spacing.xxl,
   },
   centerContent: {
     justifyContent: 'center',
@@ -341,6 +413,33 @@ const styles = StyleSheet.create({
     ...typography.h1,
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.xl,
+  },
+  communicationsSection: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  communicationCard: {
+    flexDirection: 'row',
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 2,
+    alignItems: 'flex-start',
+  },
+  communicationContent: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+  communicationTitle: {
+    ...typography.h3,
+    fontSize: 16,
+    marginBottom: spacing.xs,
+  },
+  communicationMessage: {
+    ...typography.body,
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 20,
   },
   statusGrid: {
     flexDirection: 'row',
@@ -454,11 +553,6 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg,
     marginTop: spacing.xl,
     marginBottom: spacing.xl,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
   },
   ctaButtonText: {
     ...typography.h3,

@@ -185,6 +185,23 @@ class ApiService {
   }
 
   /**
+   * Ottieni comunicazioni attive
+   */
+  async getCommunications() {
+    try {
+      const url = `${API_URL}?action=getCommunications`;
+      const data = await this.fetchWithRetry(url, { method: 'GET' });
+      
+      // Se è un array, restituiscilo, altrimenti array vuoto
+      return Array.isArray(data) ? data : [];
+      
+    } catch (error) {
+      console.error('Error fetching communications:', error);
+      return []; // In caso di errore, restituisci array vuoto (non bloccare l'app)
+    }
+  }
+
+  /**
    * Logout - rimuove dati locali
    */
   async logout() {

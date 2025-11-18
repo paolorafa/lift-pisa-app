@@ -2,6 +2,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { Platform } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
 
 // Screens
@@ -15,7 +17,7 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const BookingStack = createNativeStackNavigator();
 
-// Stack per le prenotazioni (Prenota → Scegli Data → Scegli Slot)
+// Stack per le prenotazioni
 function BookingStackScreen() {
   return (
     <BookingStack.Navigator
@@ -31,6 +33,8 @@ function BookingStackScreen() {
 }
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+  
   return (
     <Tab.Navigator
       screenOptions={{
@@ -39,8 +43,9 @@ function MainTabs() {
           backgroundColor: colors.backgroundLight,
           borderTopColor: colors.cardBorder,
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
+          // ⭐ Altezza dinamica basata su safe area
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
         },
         tabBarActiveTintColor: colors.primary,
@@ -87,16 +92,18 @@ function MainTabs() {
 
 export default function AppNavigator() {
   return (
-    <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.background },
-        }}
-      >
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Main" component={MainTabs} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <Stack.Navigator
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        >
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Main" component={MainTabs} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }

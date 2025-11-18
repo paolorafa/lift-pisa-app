@@ -240,6 +240,7 @@ const styles = StyleSheet.create({
   },
   slotsContainer: {
     padding: spacing.lg,
+    paddingBottom: spacing.xxl * 2,
   },
   slotCard: {
     flexDirection: 'row',
