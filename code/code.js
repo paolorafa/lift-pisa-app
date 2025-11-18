@@ -795,9 +795,18 @@ function filterAvailableSlotsWithCount(slots, prenData) {
       if(slotHour < 7) return false;
     }
     
-    if(slotDay === currentDay && currentHour >= (slotHour - 2)) return false;
-    
-    const slotDate = getNextSlotDate(slot.Giorno, slot.Ora_Inizio);
+    // ⭐ FIX: Calcola la data COMPLETA dello slot PRIMA del confronto
+   const slotDate = getNextSlotDate(slot.Giorno, slot.Ora_Inizio);
+   const today = new Date();
+   today.setHours(0, 0, 0, 0);
+   const slotDateOnly = new Date(slotDate);
+   slotDateOnly.setHours(0, 0, 0, 0);
+   
+   // ⭐ FIX: Confronta se è OGGI (stessa data completa), non solo stesso giorno settimana
+   const isToday = slotDateOnly.getTime() === today.getTime();
+   
+   // Solo se è OGGI e mancano meno di 2 ore, filtralo via
+   if(isToday && currentHour >= (slotHour - 2)) return false;
     const slotDateString = formatDateForComparison(slotDate);
     
     const count = prenData.filter(p => {
