@@ -201,6 +201,18 @@ class ApiService {
     }
   }
 
+  // Aggiungi al file api.js
+async getAppUpdateInfo() {
+  try {
+    const url = `${API_URL}?action=getAppUpdateInfo`;
+    const data = await this.fetchWithRetry(url, { method: 'GET' });
+    return data;
+  } catch (error) {
+    console.error('Error fetching update info:', error);
+    return { success: false, updateAvailable: false };
+  }
+}
+
   /**
    * Logout - rimuove dati locali
    */

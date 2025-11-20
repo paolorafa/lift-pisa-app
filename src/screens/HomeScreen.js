@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useState, useCallback } from 'react';
+
 import {
     Alert,
     RefreshControl,
@@ -11,6 +12,7 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import ApiService from '../services/api';
+import { APP_VERSION } from '../services/appVersion'; // ⬅️ Importa da appVersion.js
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
 export default function HomeScreen({ navigation, route }) {
@@ -380,6 +382,13 @@ export default function HomeScreen({ navigation, route }) {
           </Text>
         </View>
       )}
+      <View style={styles.versionFooter}>
+        <Text style={styles.versionText}>
+           Versione {APP_VERSION}
+        </Text>
+      </View>
+
+
     </ScrollView>
   );
 }
@@ -593,5 +602,20 @@ const styles = StyleSheet.create({
   retryButtonText: {
     ...typography.h3,
     fontWeight: 'bold',
+  },
+ versionFooter: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    paddingBottom: spacing.xxl * 2,
+  },
+  versionText: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    fontSize: 12,
+  },
+  loadingText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
   },
 });

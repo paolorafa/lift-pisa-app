@@ -12,6 +12,8 @@ import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import SlotsScreen from '../screens/SlotsScreen';
 import ScegliDataScreen from '../screens/ScegliDataScreen';
+import UpdatesScreen from '../screens/UpdatesScreen';
+
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -83,6 +85,16 @@ function MainTabs() {
           tabBarLabel: 'Prenotazioni',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="bookmark" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Updates"
+        component={UpdatesScreen}
+        options={{
+          tabBarLabel: 'Aggiornamenti',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="update" size={size} color={color} />
           ),
         }}
       />
