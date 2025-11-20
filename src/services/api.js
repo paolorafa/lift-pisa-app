@@ -213,6 +213,17 @@ async getAppUpdateInfo() {
   }
 }
 
+async getPaymentInfo(email) {
+  try {
+    const url = `${API_URL}?action=getPaymentLink&email=${encodeURIComponent(email)}`;
+    const data = await this.fetchWithRetry(url, { method: 'GET' });
+    return data;
+  } catch (error) {
+    console.error('Error fetching payment info:', error);
+    return { success: false, hasPayment: false };
+  }
+}
+
   /**
    * Logout - rimuove dati locali
    */

@@ -3,8 +3,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Platform } from 'react-native';
+import { useEffect, useState } from 'react'; // ✅ CORRETTO: import da 'react'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
+import ApiService from '../services/api';
 
 // Screens
 import BookingsScreen from '../screens/BookingsScreen';
@@ -13,7 +15,7 @@ import LoginScreen from '../screens/LoginScreen';
 import SlotsScreen from '../screens/SlotsScreen';
 import ScegliDataScreen from '../screens/ScegliDataScreen';
 import UpdatesScreen from '../screens/UpdatesScreen';
-
+import PaymentsScreen from '../screens/PaymentsScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -36,6 +38,35 @@ function BookingStackScreen() {
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const [showPaymentsTab, setShowPaymentsTab] = useState(false);
+  
+  useEffect(() => {
+    checkForPayments();
+  }, []);
+
+  const checkForPayments = async () => {
+    try {
+      const { email } = await ApiService.getSavedCredentials();
+      if (!email) {
+        setShowPaymentsTab(false);
+        return;
+      }
+
+      const result = await ApiService.getPaymentInfo(email);
+      console.log('💰 Controllo pagamenti:', result);
+      
+      if (result.success && result.hasPayment) {
+        setShowPaymentsTab(true);
+        console.log('✅ Tab Pagamenti ATTIVATO - Pagamento pendente');
+      } else {
+        setShowPaymentsTab(false);
+        console.log('❌ Tab Pagamenti DISATTIVATO - Nessun pagamento');
+      }
+    } catch (error) {
+      console.error('Errore controllo pagamenti:', error);
+      setShowPaymentsTab(false);
+    }
+  };
   
   return (
     <Tab.Navigator
@@ -78,6 +109,25 @@ function MainTabs() {
           ),
         }}
       />
+      
+      {/* Tab Pagamenti - VISIBILE SOLO SE C'È PAGAMENTO PENDENTE */}
+      {showPaymentsTab && (
+        <Tab.Screen
+          name="Payments"
+          component={PaymentsScreen}
+          options={{
+            tabBarLabel: 'Pagamento 🔔',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons 
+                name="credit-card" 
+                size={size} 
+                color={color} 
+              />
+            ),
+          }}
+        />
+      )}
+      
       <Tab.Screen
         name="Bookings"
         component={BookingsScreen}
@@ -88,6 +138,7 @@ function MainTabs() {
           ),
         }}
       />
+      
       <Tab.Screen
         name="Updates"
         component={UpdatesScreen}
