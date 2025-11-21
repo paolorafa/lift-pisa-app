@@ -55,18 +55,52 @@ export default function SlotsScreen({ navigation, route }) {
       setFilteredSlots(slots);
       return;
     }
-    const filtered = slots.filter(slot => slot.Giorno === giorno);
-    setFilteredSlots(filtered);
+      const today = new Date();
+  const isToday = data === today.toISOString().split("T")[0];
+
+  const filtered = slots
+    .filter(slot => slot.Giorno === giorno)
+    .filter(slot => {
+      if (!isToday) return true; // Giorni futuri → nessun filtro
+
+      // Giorno di oggi → applica filtro "2 ore prima"
+      const nowMinutes = today.getHours() * 60 + today.getMinutes();
+      const minAllowedMinutes = nowMinutes + 120; // +2 ore
+
+      const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
+      const slotMinutes = startHour * 60 + startMin;
+
+      return slotMinutes >= minAllowedMinutes;
+    });
+
+  setFilteredSlots(filtered);
+  };
+
+  // ⚡ NUOVA FUNZIONE: Estrae la data dalla descrizione
+  const extractDateFromDescription = (description) => {
+    const dateMatch = description.match(/\((.*?)\)/);
+    return dateMatch ? dateMatch[1] : 'Data non disponibile';
+  };
+
+  // ⚡ NUOVA FUNZIONE: Estrae info slot dalla descrizione
+  const extractSlotInfo = (description) => {
+    const countMatch = description.match(/(\d+)\/8/);
+    const currentCount = countMatch ? parseInt(countMatch[1]) : 0;
+    const date = extractDateFromDescription(description);
+    
+    return {
+      currentCount,
+      available: 8 - currentCount,
+      date
+    };
   };
 
   const handleBookSlot = (slot) => {
-    // Estrai informazioni dalla descrizione
-    const match = slot.Descrizione.match(/(\d+)\/8/);
-    const currentCount = match ? parseInt(match[1]) : 0;
+    const slotInfo = extractSlotInfo(slot.Descrizione);
     
     Alert.alert(
       'Conferma Prenotazione',
-      `Vuoi prenotare:\n\n${slot.Descrizione}\n\nPosti disponibili: ${8 - currentCount}/8`,
+      `Vuoi prenotare per:\n📅 ${slotInfo.date}\n🕐 ${slot.Ora_Inizio} - ${slot.Ora_Fine}\n\nPosti disponibili: ${slotInfo.available}/8`,
       [
         { text: 'Annulla', style: 'cancel' },
         {
@@ -91,7 +125,6 @@ export default function SlotsScreen({ navigation, route }) {
             {
               text: 'OK',
               onPress: () => {
-                // Torna alla home (attraverso il tab)
                 navigation.navigate('Home');
               },
             },
@@ -108,18 +141,19 @@ export default function SlotsScreen({ navigation, route }) {
   };
 
   const getSlotStatus = (description) => {
-    const match = description.match(/(\d+)\/8/);
-    if (!match) return { color: colors.primary, text: 'Disponibile' };
+    const slotInfo = extractSlotInfo(description);
     
-    const count = parseInt(match[1]);
-    if (count >= 7) {
-      return { color: colors.warning, text: `Solo ${8 - count} posto!` };
+    if (slotInfo.available <= 0) {
+      return { color: colors.error, text: 'COMPLETO' };
+    } else if (slotInfo.available <= 2) {
+      return { color: colors.warning, text: `Solo ${slotInfo.available} posto${slotInfo.available === 1 ? '' : 'i'}!` };
     }
-    return { color: colors.primary, text: 'Disponibile' };
+    return { color: colors.success, text: `${slotInfo.available} posti disponibili` };
   };
 
   const renderSlot = ({ item }) => {
     const status = getSlotStatus(item.Descrizione);
+    const slotInfo = extractSlotInfo(item.Descrizione);
     const isBooking = booking === item.ID_Spazio;
 
     return (
@@ -132,20 +166,29 @@ export default function SlotsScreen({ navigation, route }) {
           <Text style={styles.slotTime}>
             {item.Ora_Inizio} - {item.Ora_Fine}
           </Text>
+          <Text style={styles.slotDate}>
+            📅 {slotInfo.date}
+          </Text>
           <Text style={[styles.slotStatus, { color: status.color }]}>
             {status.text}
           </Text>
         </View>
 
         <TouchableOpacity
-          style={[styles.bookButton, isBooking && styles.bookButtonDisabled]}
+          style={[
+            styles.bookButton, 
+            isBooking && styles.bookButtonDisabled,
+            status.text === 'COMPLETO' && styles.bookButtonFull
+          ]}
           onPress={() => handleBookSlot(item)}
-          disabled={isBooking}
+          disabled={isBooking || status.text === 'COMPLETO'}
         >
           {isBooking ? (
             <ActivityIndicator size="small" color={colors.textPrimary} />
           ) : (
-            <Text style={styles.bookButtonText}>Prenota</Text>
+            <Text style={styles.bookButtonText}>
+              {status.text === 'COMPLETO' ? 'Completo' : 'Prenota'}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
@@ -171,14 +214,6 @@ export default function SlotsScreen({ navigation, route }) {
         <Text style={styles.headerTitle}>Scegli lo Slot</Text>
         <View style={{ width: 28 }} />
       </View>
-
-      {/* Data selezionata */}
-      {dataFormattata && (
-        <View style={styles.dateBox}>
-          <MaterialCommunityIcons name="calendar-check" size={24} color={colors.primary} />
-          <Text style={styles.dateText}>{dataFormattata}</Text>
-        </View>
-      )}
 
       {/* Slots List */}
       <FlatList
@@ -220,23 +255,23 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...typography.h2,
   },
-  dateBox: {
+  infoBox: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.cardBackground,
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(59, 157, 255, 0.1)',
     padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
     borderRadius: borderRadius.md,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
+    borderColor: colors.primary,
   },
-  dateText: {
-    ...typography.body,
+  infoText: {
+    ...typography.bodySmall,
     color: colors.textPrimary,
     marginLeft: spacing.sm,
-    textTransform: 'capitalize',
-    fontWeight: '600',
+    flex: 1,
+    lineHeight: 18,
   },
   slotsContainer: {
     padding: spacing.lg,
@@ -269,8 +304,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginBottom: spacing.xs,
   },
+  slotDate: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
   slotStatus: {
     ...typography.bodySmall,
+    fontWeight: '600',
   },
   bookButton: {
     backgroundColor: colors.primary,
@@ -282,6 +323,9 @@ const styles = StyleSheet.create({
   },
   bookButtonDisabled: {
     backgroundColor: colors.buttonDisabled,
+  },
+  bookButtonFull: {
+    backgroundColor: colors.error,
   },
   bookButtonText: {
     ...typography.body,
