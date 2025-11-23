@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Platform } from 'react-native';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 import { useEffect, useState } from 'react'; // ✅ CORRETTO: import da 'react'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
@@ -38,7 +38,7 @@ function BookingStackScreen() {
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
-  const [showPaymentsTab, setShowPaymentsTab] = useState(false);
+  const [hasPendingPayment, setHasPendingPayment] = useState(false);
   
   useEffect(() => {
     checkForPayments();
@@ -48,7 +48,7 @@ function MainTabs() {
     try {
       const { email } = await ApiService.getSavedCredentials();
       if (!email) {
-        setShowPaymentsTab(false);
+        setHasPendingPayment(false);
         return;
       }
 
@@ -56,15 +56,15 @@ function MainTabs() {
       console.log('💰 Controllo pagamenti:', result);
       
       if (result.success && result.hasPayment) {
-        setShowPaymentsTab(true);
-        console.log('✅ Tab Pagamenti ATTIVATO - Pagamento pendente');
+        setHasPendingPayment(true);
+        console.log('✅ Badge pagamento ATTIVATO - Pagamento pendente');
       } else {
-        setShowPaymentsTab(false);
-        console.log('❌ Tab Pagamenti DISATTIVATO - Nessun pagamento');
+        setHasPendingPayment(false);
+        console.log('❌ Badge pagamento DISATTIVATO - Nessun pagamento');
       }
     } catch (error) {
       console.error('Errore controllo pagamenti:', error);
-      setShowPaymentsTab(false);
+      setHasPendingPayment(false);
     }
   };
   
@@ -110,23 +110,34 @@ function MainTabs() {
         }}
       />
       
-      {/* Tab Pagamenti - VISIBILE SOLO SE C'È PAGAMENTO PENDENTE */}
-      {showPaymentsTab && (
-        <Tab.Screen
-          name="Payments"
-          component={PaymentsScreen}
-          options={{
-            tabBarLabel: 'Pagamento 🔔',
-            tabBarIcon: ({ color, size }) => (
+      {/* 🔥 TAB PAGAMENTI SEMPRE VISIBILE CON BADGE */}
+      <Tab.Screen
+        name="Payments"
+        component={PaymentsScreen}
+        listeners={{
+          tabPress: () => {
+            // Ricarica i dati quando si clicca sul tab
+            checkForPayments();
+          },
+        }}
+        options={{
+          tabBarLabel: hasPendingPayment ? 'Pagamento 🔔' : 'Pagamenti',
+          tabBarIcon: ({ color, size }) => (
+            <View style={styles.iconContainer}>
               <MaterialCommunityIcons 
                 name="credit-card" 
                 size={size} 
                 color={color} 
               />
-            ),
-          }}
-        />
-      )}
+              {hasPendingPayment && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>!</Text>
+                </View>
+              )}
+            </View>
+          ),
+        }}
+      />
       
       <Tab.Screen
         name="Bookings"
@@ -152,6 +163,31 @@ function MainTabs() {
     </Tab.Navigator>
   );
 }
+
+// Stili per il badge
+const styles = StyleSheet.create({
+  iconContainer: {
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -6,
+    backgroundColor: colors.error,
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.backgroundLight,
+  },
+  badgeText: {
+    color: colors.textPrimary,
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+});
 
 export default function AppNavigator() {
   return (

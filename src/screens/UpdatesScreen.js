@@ -1,6 +1,6 @@
-// [file name]: UpdatesScreen.js
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -8,6 +8,8 @@ import {
   Text,
   TouchableOpacity,
   View,
+  RefreshControl,
+  ScrollView,
 } from 'react-native';
 import ApiService from '../services/api';
 import { APP_VERSION, isUpdateAvailable } from '../../src/services/appVersion';
@@ -15,17 +17,34 @@ import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
 export default function UpdatesScreen({ navigation }) {
   const [updateInfo, setUpdateInfo] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastChecked, setLastChecked] = useState(null);
 
-  useEffect(() => {
-    loadUpdateInfo();
-  }, []);
+  // 🔄 Ricarica quando la schermata diventa visibile (massimo ogni 5 minuti)
+  useFocusEffect(
+    useCallback(() => {
+      const shouldRefresh = !lastChecked || 
+        (new Date() - lastChecked) > 5 * 60 * 1000; // 5 minuti
+      
+      if (shouldRefresh) {
+        console.log('🔄 UpdatesScreen focus - ricarico dati');
+        loadUpdateInfo(false);
+      }
+    }, [lastChecked])
+  );
 
-  const loadUpdateInfo = async () => {
+  const loadUpdateInfo = async (showLoader = true) => {
     try {
+      if (showLoader) setRefreshing(true);
+      
       const result = await ApiService.getAppUpdateInfo();
       
-      // Controlla se c'è realmente un aggiornamento disponibile
+      console.log('🔍 Update check:', {
+        current: APP_VERSION,
+        latest: result.latestVersion,
+        needsUpdate: isUpdateAvailable(APP_VERSION, result.latestVersion)
+      });
+      
       if (result.updateAvailable && result.latestVersion) {
         result.isUpdateNeeded = isUpdateAvailable(APP_VERSION, result.latestVersion);
       } else {
@@ -33,10 +52,16 @@ export default function UpdatesScreen({ navigation }) {
       }
       
       setUpdateInfo(result);
+      setLastChecked(new Date());
     } catch (error) {
       console.error('Error loading update info:', error);
+      setUpdateInfo({
+        success: false,
+        updateAvailable: false,
+        isUpdateNeeded: false
+      });
     } finally {
-      setLoading(false);
+      if (showLoader) setRefreshing(false);
     }
   };
 
@@ -56,20 +81,41 @@ export default function UpdatesScreen({ navigation }) {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <MaterialCommunityIcons name="loading" size={48} color={colors.primary} />
-        <Text style={styles.loadingText}>Caricamento...</Text>
-      </View>
-    );
-  }
+  const onRefresh = () => {
+    loadUpdateInfo(true);
+  };
 
   return (
-    <View style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh} 
+          tintColor={colors.primary} 
+        />
+      }
+    >
+      {/* Header con pulsante refresh */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Aggiornamenti</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.headerTitle}>Aggiornamenti</Text>
+          <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+            <MaterialCommunityIcons 
+              name="refresh" 
+              size={24} 
+              color={colors.primary} 
+              style={refreshing && styles.refreshingIcon} 
+            />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.currentVersion}>Versione attuale: {APP_VERSION}</Text>
+        {lastChecked && (
+          <Text style={styles.lastChecked}>
+            Ultimo controllo: {lastChecked.toLocaleTimeString()}
+          </Text>
+        )}
       </View>
 
       {updateInfo?.isUpdateNeeded ? (
@@ -147,6 +193,13 @@ export default function UpdatesScreen({ navigation }) {
               </Text>
             </View>
           )}
+
+          {/* Istruzioni per refresh */}
+          <View style={styles.refreshInstructions}>
+            <Text style={styles.refreshInstructionsText}>
+              💡 Tira verso il basso per controllare nuovi aggiornamenti
+            </Text>
+          </View>
         </View>
       )}
 
@@ -172,8 +225,14 @@ export default function UpdatesScreen({ navigation }) {
             {updateInfo?.isUpdateNeeded ? 'Aggiornamento disponibile' : 'Aggiornato'}
           </Text>
         </View>
+        {lastChecked && (
+          <View style={styles.techInfoRow}>
+            <Text style={styles.techInfoLabel}>Ultimo controllo:</Text>
+            <Text style={styles.techInfoValue}>{lastChecked.toLocaleTimeString()}</Text>
+          </View>
+        )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -181,24 +240,39 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    padding: spacing.lg,
   },
-  centerContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
+  scrollContent: {
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   header: {
     paddingVertical: spacing.lg,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: spacing.xs,
   },
   headerTitle: {
     ...typography.h1,
-    textAlign: 'center',
-    marginBottom: spacing.xs,
   },
   currentVersion: {
     ...typography.bodySmall,
     color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  lastChecked: {
+    ...typography.caption,
+    color: colors.textTertiary,
+  },
+  refreshButton: {
+    padding: spacing.sm,
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.round,
+  },
+  refreshingIcon: {
+    transform: [{ rotate: '180deg' }],
   },
   updateCard: {
     backgroundColor: colors.cardBackground,
@@ -312,17 +386,31 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textSecondary,
     textAlign: 'center',
+    marginBottom: spacing.md,
   },
   latestVersionInfo: {
     marginTop: spacing.md,
     padding: spacing.md,
     backgroundColor: colors.backgroundLight,
     borderRadius: borderRadius.md,
+    marginBottom: spacing.lg,
   },
   latestVersionText: {
     ...typography.bodySmall,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  refreshInstructions: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.backgroundLight,
+    borderRadius: borderRadius.md,
+  },
+  refreshInstructionsText: {
+    ...typography.bodySmall,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   techInfo: {
     backgroundColor: colors.cardBackground,
@@ -349,10 +437,5 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textPrimary,
     fontWeight: '600',
-  },
-  loadingText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
   },
 });

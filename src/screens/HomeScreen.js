@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
@@ -18,23 +19,22 @@ export default function HomeScreen({ navigation }) {
   const [userData, setUserData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [communications, setCommunications] = useState([]);
+  const [isLoading, setIsLoading] = useState(true); // 🔥 Nuovo stato per caricamento iniziale
 
+  // 🔥 UNIFICA IL CARICAMENTO: usa solo useFocusEffect
   useFocusEffect(
     useCallback(() => {
-      console.log('🔄 HomeScreen riceve focus - ricarico dati');
-      loadUserData(false);
-      loadCommunications();
+      console.log('🔄 HomeScreen focus - ricarico dati');
+      loadAllData();
     }, [])
   );
 
-  useEffect(() => {
-    loadUserData(true);
-    loadCommunications();
-  }, []);
-
-  const loadUserData = async (showLoader = true) => {
+  const loadAllData = async (showLoader = true) => {
     try {
-      if (showLoader) setRefreshing(true);
+      if (showLoader) {
+        setRefreshing(true);
+        setIsLoading(true);
+      }
       
       const { email, code } = await ApiService.getSavedCredentials();
       if (!email || !code) {
@@ -42,39 +42,39 @@ export default function HomeScreen({ navigation }) {
         return;
       }
 
-      const data = await ApiService.refreshUserData(email, code, true);
+      // 🔥 Carica tutto in parallelo
+      const [userDataResult, commsResult] = await Promise.all([
+        ApiService.refreshUserData(email, code, true),
+        ApiService.getCommunications()
+      ]);
       
-      if (data.found) {
-        setUserData(data);
-        console.log('✅ Dati utente aggiornati:', data.bookings?.length || 0, 'prenotazioni');
+      if (userDataResult.found) {
+        setUserData(userDataResult);
+        console.log('✅ Dati utente aggiornati:', {
+          isPaid: userDataResult.isPaid,
+          certificateExpired: userDataResult.certificateExpired,
+          bookings: userDataResult.bookings?.length || 0
+        });
       } else {
         Alert.alert('Errore', 'Impossibile caricare i dati utente');
       }
-    } catch (error) {
-      console.error('Error loading user data:', error);
-    } finally {
-      if (showLoader) setRefreshing(false);
-    }
-  };
 
-  const loadCommunications = async () => {
-    try {
-      const comms = await ApiService.getCommunications();
-      if (Array.isArray(comms)) {
-        setCommunications(comms);
+      if (Array.isArray(commsResult)) {
+        setCommunications(commsResult);
       }
+      
     } catch (error) {
-      console.error('Error loading communications:', error);
+      console.error('Error loading data:', error);
+    } finally {
+      if (showLoader) {
+        setRefreshing(false);
+        setIsLoading(false);
+      }
     }
   };
 
   const onRefresh = async () => {
-    setRefreshing(true);
-    await Promise.all([
-      loadUserData(false),
-      loadCommunications()
-    ]);
-    setRefreshing(false);
+    await loadAllData(true);
   };
 
   const handleLogout = () => {
@@ -109,6 +109,21 @@ export default function HomeScreen({ navigation }) {
 
   const canBook = userData?.isPaid && !userData?.certificateExpired;
 
+  // 🔥 Controlla se mostrare l'alert
+  const shouldShowStatusAlert = () => {
+    return !userData?.isPaid || userData?.certificateExpired;
+  };
+
+  // 🔥 Mostra loader durante il caricamento iniziale
+ if (isLoading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Caricamento...</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={styles.container}
@@ -120,7 +135,6 @@ export default function HomeScreen({ navigation }) {
       {/* Header con Logo */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          {/* Logo */}
           <Image 
             source={require('../../assets/lift-logo.png')} 
             style={styles.logo}
@@ -158,31 +172,33 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
-      {/* Status Card */}
-      <View style={[styles.statusCard, { borderColor: getStatusColor() }]}>
-        <View style={styles.statusHeader}>
-          <MaterialCommunityIcons
-            name={canBook ? 'check-circle' : 'alert-circle'}
-            size={32}
-            color={getStatusColor()}
-          />
-          <Text style={[styles.statusText, { color: getStatusColor() }]}>{getStatusText()}</Text>
+      {/* Status Card - VISIBILE SOLO SE C'È UN PROBLEMA */}
+      {shouldShowStatusAlert() && (
+        <View style={[styles.statusCard, { borderColor: getStatusColor() }]}>
+          <View style={styles.statusHeader}>
+            <MaterialCommunityIcons
+              name={canBook ? 'check-circle' : 'alert-circle'}
+              size={32}
+              color={getStatusColor()}
+            />
+            <Text style={[styles.statusText, { color: getStatusColor() }]}>{getStatusText()}</Text>
+          </View>
+
+          {!userData?.isPaid && (
+            <Text style={styles.warningText}>
+              ⚠️ Il tuo abbonamento non è attivo. Contatta la reception per rinnovarlo.
+            </Text>
+          )}
+
+          {userData?.certificateExpired && (
+            <Text style={styles.warningText}>
+              ⚠️ Il tuo certificato medico è scaduto il {userData.certificateExpiryString}
+            </Text>
+          )}
         </View>
+      )}
 
-        {!userData?.isPaid && (
-          <Text style={styles.warningText}>
-            ⚠️ Il tuo abbonamento non è attivo. Contatta la reception per rinnovarlo.
-          </Text>
-        )}
-
-        {userData?.certificateExpired && (
-          <Text style={styles.warningText}>
-            ⚠️ Il tuo certificato medico è scaduto il {userData.certificateExpiryString}
-          </Text>
-        )}
-      </View>
-
-      {/* Status Grid - Tessera ASI aggiunta qui */}
+      {/* Resto del codice rimane uguale... */}
       <View style={styles.statusGrid}>
         {/* Abbonamento */}
         <View style={[styles.statusCardGrid, styles.halfCard]}>
@@ -202,6 +218,11 @@ export default function HomeScreen({ navigation }) {
             {userData?.abbonamentoExpired ? 'Scad. ' : 'Scad. '}
             {userData?.abbonamentoExpiryString || 'N/A'}
           </Text>
+          {!userData?.isPaid && (
+            <View style={styles.warningIndicator}>
+              <MaterialCommunityIcons name="alert" size={16} color={colors.error} />
+            </View>
+          )}
         </View>
 
         {/* Certificato Medico */}
@@ -222,6 +243,11 @@ export default function HomeScreen({ navigation }) {
             {userData?.certificateExpired ? 'Scad. ' : 'Scad. '}
             {userData?.certificateExpiryString || 'N/A'}
           </Text>
+          {userData?.certificateExpired && (
+            <View style={styles.warningIndicator}>
+              <MaterialCommunityIcons name="alert" size={16} color={colors.error} />
+            </View>
+          )}
         </View>
 
         {/* Tessera ASI */}
@@ -270,7 +296,11 @@ export default function HomeScreen({ navigation }) {
           <Text style={[styles.actionTitle, !canBook && styles.actionTitleDisabled]}>
             Nuova Prenotazione
           </Text>
-          {!canBook && <Text style={styles.actionDisabledText}>Non disponibile</Text>}
+          {!canBook && (
+            <Text style={styles.actionDisabledText}>
+              {!userData?.isPaid ? 'Abbonamento non attivo' : 'Certificato scaduto'}
+            </Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -309,6 +339,7 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
+// Gli stili rimangono uguali...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -403,7 +434,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     lineHeight: 20,
   },
-  // Nuovi stili per la griglia status
   statusGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -419,6 +449,7 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     marginBottom: spacing.md,
     alignItems: 'center',
+    position: 'relative',
   },
   halfCard: {
     width: '48%',
@@ -435,6 +466,17 @@ const styles = StyleSheet.create({
   },
   statusValueSmall: {
     fontSize: 16,
+  },
+  warningIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: colors.error,
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   quickActions: {
     flexDirection: 'row',
@@ -504,5 +546,15 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.primary,
     fontWeight: '600',
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    flex: 1,
+  },
+  loadingText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
   },
 });
