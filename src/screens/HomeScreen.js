@@ -9,6 +9,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
@@ -116,13 +117,21 @@ export default function HomeScreen({ navigation }) {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
     >
-      {/* Header */}
+      {/* Header con Logo */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Ciao,</Text>
-          <Text style={styles.userName}>
-            {userData?.nome} {userData?.cognome}
-          </Text>
+        <View style={styles.headerLeft}>
+          {/* Logo */}
+          <Image 
+            source={require('../../assets/lift-logo.png')} 
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <View style={styles.userInfo}>
+            <Text style={styles.greeting}>Ciao,</Text>
+            <Text style={styles.userName}>
+              {userData?.nome}
+            </Text>
+          </View>
         </View>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <MaterialCommunityIcons name="logout" size={24} color={colors.textPrimary} />
@@ -315,6 +324,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl * 2,
     paddingBottom: spacing.lg,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginRight: spacing.md,
+  },
+  userInfo: {
+    flex: 1,
   },
   greeting: {
     ...typography.bodySmall,

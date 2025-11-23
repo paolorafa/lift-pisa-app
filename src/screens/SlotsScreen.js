@@ -298,6 +298,7 @@ const styles = StyleSheet.create({
   },
   slotDetails: {
     flex: 1,
+    marginRight: spacing.lg,
   },
   slotTime: {
     ...typography.h3,
