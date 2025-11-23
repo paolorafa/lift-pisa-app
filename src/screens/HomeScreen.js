@@ -1,93 +1,85 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Image,
 } from 'react-native';
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
-export default function HomeScreen({ navigation, route }) {
-  const [userData, setUserData] = useState(route.params?.userData || null);
+export default function HomeScreen({ navigation }) {
+  const [userData, setUserData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(!route.params?.userData);
   const [communications, setCommunications] = useState([]);
 
-  const loadUserData = useCallback(async () => {
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🔄 HomeScreen riceve focus - ricarico dati');
+      loadUserData(false);
+      loadCommunications();
+    }, [])
+  );
+
+  useEffect(() => {
+    loadUserData(true);
+    loadCommunications();
+  }, []);
+
+  const loadUserData = async (showLoader = true) => {
     try {
-      setLoading(true);
-      const { email, code } = await ApiService.getSavedCredentials();
+      if (showLoader) setRefreshing(true);
       
+      const { email, code } = await ApiService.getSavedCredentials();
       if (!email || !code) {
         navigation.replace('Login');
         return;
       }
+
+      const data = await ApiService.refreshUserData(email, code, true);
       
-      console.log('🔄 Caricamento dati utente...');
-      const freshData = await ApiService.refreshUserData(email, code);
-      
-      if (freshData.found) {
-        setUserData(freshData);
-        console.log('✅ Dati utente caricati:', freshData.nome, freshData.cognome);
-        
-        // Carica comunicazioni
-        const comms = await ApiService.getCommunications();
-        setCommunications(comms);
-        console.log('✅ Comunicazioni caricate:', comms.length);
+      if (data.found) {
+        setUserData(data);
+        console.log('✅ Dati utente aggiornati:', data.bookings?.length || 0, 'prenotazioni');
       } else {
         Alert.alert('Errore', 'Impossibile caricare i dati utente');
-        navigation.replace('Login');
       }
     } catch (error) {
-      console.error('❌ Errore caricamento dati:', error);
-      Alert.alert('Errore', 'Impossibile caricare i dati. Riprova.');
-      navigation.replace('Login');
+      console.error('Error loading user data:', error);
     } finally {
-      setLoading(false);
+      if (showLoader) setRefreshing(false);
     }
-  }, [navigation]);
+  };
 
-  useEffect(() => {
-    if (route.params?.userData) {
-      setUserData(route.params.userData);
-      setLoading(false);
-      // Carica comunque le comunicazioni
-      ApiService.getCommunications().then(setCommunications);
-    } else {
-      loadUserData();
+  const loadCommunications = async () => {
+    try {
+      const comms = await ApiService.getCommunications();
+      if (Array.isArray(comms)) {
+        setCommunications(comms);
+      }
+    } catch (error) {
+      console.error('Error loading communications:', error);
     }
-  }, [route.params?.userData, loadUserData]);
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    try {
-      const { email, code } = await ApiService.getSavedCredentials();
-      if (email && code) {
-        const freshData = await ApiService.refreshUserData(email, code);
-        if (freshData.found) {
-          setUserData(freshData);
-        }
-        
-        // Ricarica comunicazioni
-        const comms = await ApiService.getCommunications();
-        setCommunications(comms);
-      }
-    } catch (error) {
-      console.error('Error refreshing:', error);
-    } finally {
-      setRefreshing(false);
-    }
+    await Promise.all([
+      loadUserData(false),
+      loadCommunications()
+    ]);
+    setRefreshing(false);
   };
 
   const handleLogout = () => {
     Alert.alert(
-      'Logout',
+      'Conferma Logout',
       'Sei sicuro di voler uscire?',
       [
         { text: 'Annulla', style: 'cancel' },
@@ -103,87 +95,19 @@ export default function HomeScreen({ navigation, route }) {
     );
   };
 
-  const handleCancelBooking = async (bookingId) => {
-    Alert.alert(
-      'Conferma Cancellazione',
-      'Sei sicuro di voler cancellare questa prenotazione?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Sì, Cancella',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { email } = await ApiService.getSavedCredentials();
-              const result = await ApiService.cancelBooking(email, bookingId);
-              
-              if (result.success) {
-                Alert.alert('Successo', result.message);
-                onRefresh();
-              } else {
-                Alert.alert('Errore', result.message);
-              }
-            } catch (error) {
-              Alert.alert('Errore', 'Impossibile cancellare la prenotazione');
-            }
-          },
-        },
-      ]
-    );
+  const getStatusColor = () => {
+    if (!userData?.isPaid) return colors.error;
+    if (userData?.certificateExpired) return colors.warning;
+    return colors.success;
   };
 
-  const getCommunicationStyle = (tipo) => {
-    switch(tipo) {
-      case 'warning':
-        return {
-          icon: 'alert',
-          bgColor: 'rgba(251, 191, 36, 0.1)',
-          borderColor: colors.warning,
-          iconColor: colors.warning,
-        };
-      case 'important':
-        return {
-          icon: 'alert-circle',
-          bgColor: 'rgba(239, 68, 68, 0.1)',
-          borderColor: colors.error,
-          iconColor: colors.error,
-        };
-      case 'info':
-      default:
-        return {
-          icon: 'information',
-          bgColor: 'rgba(59, 157, 255, 0.1)',
-          borderColor: colors.primary,
-          iconColor: colors.primary,
-        };
-    }
+  const getStatusText = () => {
+    if (!userData?.isPaid) return 'Abbonamento Non Attivo';
+    if (userData?.certificateExpired) return 'Certificato Scaduto';
+    return 'Attivo';
   };
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Caricamento dati...</Text>
-      </View>
-    );
-  }
-
-  if (!userData) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>Errore nel caricamento dati</Text>
-        <TouchableOpacity 
-          style={styles.retryButton}
-          onPress={loadUserData}
-        >
-          <Text style={styles.retryButtonText}>Riprova</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const upcomingBookings = (userData.bookings || []).slice(0, 3);
-  const hasMoreBookings = (userData.bookings || []).length > 3;
+  const canBook = userData?.isPaid && !userData?.certificateExpired;
 
   return (
     <ScrollView
@@ -193,191 +117,192 @@ export default function HomeScreen({ navigation, route }) {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
     >
-      {/* Header */}
+      {/* Header con Logo */}
       <View style={styles.header}>
-        <View>
-          <MaterialCommunityIcons name="arm-flex" size={32} color={colors.primary} />
+        <View style={styles.headerLeft}>
+          {/* Logo */}
+          <Image 
+            source={require('../../assets/lift-logo.png')} 
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <View style={styles.userInfo}>
+            <Text style={styles.greeting}>Ciao,</Text>
+            <Text style={styles.userName}>
+              {userData?.nome}
+            </Text>
+          </View>
         </View>
-        <TouchableOpacity onPress={handleLogout}>
-          <MaterialCommunityIcons name="account-circle" size={32} color={colors.textPrimary} />
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <MaterialCommunityIcons name="logout" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
       </View>
-
-      {/* Welcome */}
-      <Text style={styles.welcomeTitle}>
-        Ciao, {userData.nome || 'Utente'}!
-      </Text>
 
       {/* Comunicazioni */}
       {communications.length > 0 && (
         <View style={styles.communicationsSection}>
-          {communications.map((comm) => {
-            const style = getCommunicationStyle(comm.tipo);
-            return (
-              <View
-                key={comm.id}
-                style={[
-                  styles.communicationCard,
-                  {
-                    backgroundColor: style.bgColor,
-                    borderColor: style.borderColor,
-                  }
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={style.icon}
-                  size={24}
-                  color={style.iconColor}
-                />
-                <View style={styles.communicationContent}>
-                  <Text style={styles.communicationTitle}>{comm.titolo}</Text>
-                  <Text style={styles.communicationMessage}>{comm.messaggio}</Text>
-                </View>
-              </View>
-            );
-          })}
+          <Text style={styles.sectionTitle}>📢 Comunicazioni</Text>
+          {communications.map((comm) => (
+            <View 
+              key={comm.id} 
+              style={[
+                styles.communicationCard,
+                comm.tipo === 'warning' && styles.communicationWarning,
+                comm.tipo === 'important' && styles.communicationImportant
+              ]}
+            >
+              <Text style={styles.communicationTitle}>{comm.titolo}</Text>
+              <Text style={styles.communicationMessage}>{comm.messaggio}</Text>
+            </View>
+          ))}
         </View>
       )}
 
-      {/* Status Cards - Griglia 2x2 */}
+      {/* Status Card */}
+      <View style={[styles.statusCard, { borderColor: getStatusColor() }]}>
+        <View style={styles.statusHeader}>
+          <MaterialCommunityIcons
+            name={canBook ? 'check-circle' : 'alert-circle'}
+            size={32}
+            color={getStatusColor()}
+          />
+          <Text style={[styles.statusText, { color: getStatusColor() }]}>{getStatusText()}</Text>
+        </View>
+
+        {!userData?.isPaid && (
+          <Text style={styles.warningText}>
+            ⚠️ Il tuo abbonamento non è attivo. Contatta la reception per rinnovarlo.
+          </Text>
+        )}
+
+        {userData?.certificateExpired && (
+          <Text style={styles.warningText}>
+            ⚠️ Il tuo certificato medico è scaduto il {userData.certificateExpiryString}
+          </Text>
+        )}
+      </View>
+
+      {/* Status Grid - Tessera ASI aggiunta qui */}
       <View style={styles.statusGrid}>
         {/* Abbonamento */}
-        <View style={[styles.statusCard, styles.halfCard]}>
+        <View style={[styles.statusCardGrid, styles.halfCard]}>
           <MaterialCommunityIcons 
             name="credit-card" 
             size={24} 
-            color={userData.abbonamentoExpired ? colors.error : colors.textPrimary} 
+            color={userData?.abbonamentoExpired ? colors.error : colors.textPrimary} 
           />
           <Text style={styles.statusLabel}>Abbonamento</Text>
           <Text
             style={[
               styles.statusValue,
-              { color: userData.abbonamentoExpired ? colors.error : colors.success },
+              { color: userData?.abbonamentoExpired ? colors.error : colors.success },
               styles.statusValueSmall,
             ]}
           >
-            {userData.abbonamentoExpired ? 'Scad. ' : 'Scad. '}
-            {userData.abbonamentoExpiryString || 'N/A'}
+            {userData?.abbonamentoExpired ? 'Scad. ' : 'Scad. '}
+            {userData?.abbonamentoExpiryString || 'N/A'}
           </Text>
         </View>
 
         {/* Certificato Medico */}
-        <View style={[styles.statusCard, styles.halfCard]}>
+        <View style={[styles.statusCardGrid, styles.halfCard]}>
           <MaterialCommunityIcons
             name="file-document"
             size={24}
-            color={userData.certificateExpired ? colors.error : colors.textPrimary}
+            color={userData?.certificateExpired ? colors.error : colors.textPrimary}
           />
           <Text style={styles.statusLabel}>Certificato</Text>
           <Text
             style={[
               styles.statusValue,
-              { color: userData.certificateExpired ? colors.error : colors.success },
+              { color: userData?.certificateExpired ? colors.error : colors.success },
               styles.statusValueSmall,
             ]}
           >
-            {userData.certificateExpired ? 'Scad. ' : 'Scad. '}
-            {userData.certificateExpiryString || 'N/A'}
+            {userData?.certificateExpired ? 'Scad. ' : 'Scad. '}
+            {userData?.certificateExpiryString || 'N/A'}
           </Text>
         </View>
 
         {/* Tessera ASI */}
-        <View style={[styles.statusCard, styles.halfCard]}>
+        <View style={[styles.statusCardGrid, styles.halfCard]}>
           <MaterialCommunityIcons
             name="card-account-details"
             size={24}
-            color={userData.asiExpired ? colors.error : colors.textPrimary}
+            color={userData?.asiExpired ? colors.error : colors.textPrimary}
           />
           <Text style={styles.statusLabel}>Tessera ASI</Text>
           <Text
             style={[
               styles.statusValue,
-              { color: userData.asiExpired ? colors.error : colors.success },
+              { color: userData?.asiExpired ? colors.error : colors.success },
               styles.statusValueSmall,
             ]}
           >
-            {userData.asiExpired ? 'Scad. ' : 'Scad. '}
-            {userData.asiExpiryString || 'N/A'}
+            {userData?.asiExpired ? 'Scad. ' : 'Scad. '}
+            {userData?.asiExpiryString || 'N/A'}
           </Text>
         </View>
 
         {/* Prenotazioni */}
-        <View style={[styles.statusCard, styles.halfCard]}>
+        <View style={[styles.statusCardGrid, styles.halfCard]}>
           <MaterialCommunityIcons name="calendar-check" size={24} color={colors.textPrimary} />
           <Text style={styles.statusLabel}>Prenotazioni</Text>
           <Text style={[styles.statusValue, styles.statusValueSmall]}>
-            {userData.weeklyBookings || 0}
-            {userData.frequenza !== 'Open' && `/${userData.frequenza}`}
+            {userData?.weeklyBookings || 0}
+            {userData?.frequenza !== 'Open' && `/${userData?.frequenza}`}
           </Text>
         </View>
       </View>
 
-      {/* Prossime Prenotazioni */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Le Tue Prossime Prenotazioni</Text>
+      {/* Quick Actions */}
+      <View style={styles.quickActions}>
+        <TouchableOpacity
+          style={[styles.actionCard, !canBook && styles.actionCardDisabled]}
+          onPress={() => canBook && navigation.navigate('Slots')}
+          disabled={!canBook}
+        >
+          <MaterialCommunityIcons
+            name="calendar-plus"
+            size={48}
+            color={canBook ? colors.primary : colors.buttonDisabled}
+          />
+          <Text style={[styles.actionTitle, !canBook && styles.actionTitleDisabled]}>
+            Nuova Prenotazione
+          </Text>
+          {!canBook && <Text style={styles.actionDisabledText}>Non disponibile</Text>}
+        </TouchableOpacity>
 
-        {upcomingBookings.length > 0 ? (
-          <>
-            {upcomingBookings.map((booking) => (
-              <View key={booking.id} style={styles.bookingCard}>
-                <View style={styles.bookingIcon}>
-                  <MaterialCommunityIcons name="dumbbell" size={24} color={colors.primary} />
-                </View>
-                <View style={styles.bookingDetails}>
-                  <Text style={styles.bookingTitle}>Sala Pesi</Text>
-                  <Text style={styles.bookingTime}>
-                    {booking.dataFormatted}, {booking.oraInizio} - {booking.oraFine}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => handleCancelBooking(booking.id)}
-                  style={styles.cancelButton}
-                >
-                  <Text style={styles.cancelButtonText}>Annulla</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-
-            {hasMoreBookings && (
-              <TouchableOpacity
-                style={styles.viewAllButton}
-                onPress={() => navigation.navigate('Bookings')}
-              >
-                <Text style={styles.viewAllText}>
-                  Vedi tutte le prenotazioni ({userData.bookings.length})
-                </Text>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={colors.primary} />
-              </TouchableOpacity>
-            )}
-          </>
-        ) : (
-          <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="calendar-remove" size={48} color={colors.textTertiary} />
-            <Text style={styles.emptyText}>Non hai altre attività in programma.</Text>
-          </View>
-        )}
+        <TouchableOpacity
+          style={styles.actionCard}
+          onPress={() => navigation.navigate('Bookings')}
+        >
+          <MaterialCommunityIcons name="bookmark" size={48} color={colors.primary} />
+          <Text style={styles.actionTitle}>Le Mie Prenotazioni</Text>
+          <Text style={styles.actionSubtitle}>{userData?.bookings?.length || 0} attive</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* CTA Button */}
-      {userData.isPaid && !userData.certificateExpired && (
-        <TouchableOpacity
-          style={styles.ctaButton}
-          onPress={() => navigation.navigate('Slots')}
-        >
-          <Text style={styles.ctaButtonText}>Prenota Ora</Text>
-          <MaterialCommunityIcons name="arrow-right" size={24} color={colors.textPrimary} />
-        </TouchableOpacity>
-      )}
-
-      {/* Warning */}
-      {(!userData.isPaid || userData.certificateExpired) && (
-        <View style={styles.warningBox}>
-          <MaterialCommunityIcons name="alert-circle" size={24} color={colors.warning} />
-          <Text style={styles.warningText}>
-            {!userData.isPaid
-              ? 'Abbonamento non attivo. Contatta la reception.'
-              : 'Certificato medico scaduto. Devi rinnovarlo per prenotare.'}
-          </Text>
+      {/* Upcoming Bookings */}
+      {userData?.bookings && userData.bookings.length > 0 && (
+        <View style={styles.bookingsSection}>
+          <Text style={styles.sectionTitle}>Prossime Prenotazioni</Text>
+          {userData.bookings.slice(0, 3).map((booking) => (
+            <View key={booking.id} style={styles.bookingCard}>
+              <MaterialCommunityIcons name="dumbbell" size={24} color={colors.primary} />
+              <View style={styles.bookingInfo}>
+                <Text style={styles.bookingTime}>{booking.slotDescription}</Text>
+              </View>
+            </View>
+          ))}
+          {userData.bookings.length > 3 && (
+            <TouchableOpacity
+              style={styles.viewAllButton}
+              onPress={() => navigation.navigate('Bookings')}
+            >
+              <Text style={styles.viewAllText}>Vedi tutte ({userData.bookings.length})</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </ScrollView>
@@ -390,45 +315,61 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scrollContent: {
-    paddingBottom: spacing.xxl,
-  },
-  centerContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
+    paddingBottom: spacing.xxl * 2,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.xl * 2,
+    paddingBottom: spacing.lg,
   },
-  welcomeTitle: {
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginRight: spacing.md,
+  },
+  userInfo: {
+    flex: 1,
+  },
+  greeting: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  userName: {
     ...typography.h1,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
+    fontSize: 28,
+  },
+  logoutButton: {
+    padding: spacing.sm,
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.round,
   },
   communicationsSection: {
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.lg,
   },
   communicationCard: {
-    flexDirection: 'row',
-    borderRadius: borderRadius.lg,
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.md,
     padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 2,
-    alignItems: 'flex-start',
+    marginBottom: spacing.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
   },
-  communicationContent: {
-    flex: 1,
-    marginLeft: spacing.md,
+  communicationWarning: {
+    borderLeftColor: colors.warning,
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+  },
+  communicationImportant: {
+    borderLeftColor: colors.error,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
   },
   communicationTitle: {
     ...typography.h3,
@@ -436,24 +377,48 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   communicationMessage: {
-    ...typography.body,
-    fontSize: 14,
-    color: colors.textSecondary,
+    ...typography.bodySmall,
     lineHeight: 20,
   },
+  statusCard: {
+    backgroundColor: colors.cardBackground,
+    marginHorizontal: spacing.lg,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    borderWidth: 2,
+    marginBottom: spacing.xl,
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  statusText: {
+    ...typography.h2,
+    marginLeft: spacing.md,
+  },
+  warningText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+    lineHeight: 20,
+  },
+  // Nuovi stili per la griglia status
   statusGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
   },
-  statusCard: {
+  statusCardGrid: {
     backgroundColor: colors.cardBackground,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     marginBottom: spacing.md,
+    alignItems: 'center',
   },
   halfCard: {
     width: '48%',
@@ -462,6 +427,7 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
+    textAlign: 'center',
   },
   statusValue: {
     ...typography.h3,
@@ -470,128 +436,73 @@ const styles = StyleSheet.create({
   statusValueSmall: {
     fontSize: 16,
   },
-  section: {
+  quickActions: {
+    flexDirection: 'row',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
+    marginBottom: spacing.xl,
+    gap: spacing.md,
+  },
+  actionCard: {
+    flex: 1,
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  actionCardDisabled: {
+    opacity: 0.5,
+  },
+  actionTitle: {
+    ...typography.h3,
+    fontSize: 16,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  actionTitleDisabled: {
+    color: colors.textTertiary,
+  },
+  actionSubtitle: {
+    ...typography.bodySmall,
+    marginTop: spacing.xs,
+  },
+  actionDisabledText: {
+    ...typography.caption,
+    color: colors.error,
+    marginTop: spacing.xs,
+  },
+  bookingsSection: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
   },
   sectionTitle: {
     ...typography.h2,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   bookingCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.cardBackground,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  bookingIcon: {
-    width: 48,
-    height: 48,
     borderRadius: borderRadius.md,
-    backgroundColor: colors.backgroundLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
   },
-  bookingDetails: {
+  bookingInfo: {
     flex: 1,
-  },
-  bookingTitle: {
-    ...typography.h3,
-    fontSize: 18,
-    marginBottom: spacing.xs,
+    marginLeft: spacing.md,
   },
   bookingTime: {
-    ...typography.bodySmall,
-  },
-  cancelButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  cancelButtonText: {
-    ...typography.bodySmall,
-    color: colors.primary,
-    fontWeight: '600',
+    ...typography.body,
   },
   viewAllButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.sm,
   },
   viewAllText: {
     ...typography.body,
     color: colors.primary,
     fontWeight: '600',
-    marginRight: spacing.xs,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-    backgroundColor: colors.cardBackground,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderStyle: 'dashed',
-  },
-  emptyText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
-  },
-  ctaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    marginBottom: spacing.xl,
-  },
-  ctaButtonText: {
-    ...typography.h3,
-    fontWeight: 'bold',
-    marginRight: spacing.sm,
-  },
-  warningBox: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(251, 191, 36, 0.1)',
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    marginBottom: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.warning,
-  },
-  warningText: {
-    ...typography.body,
-    color: colors.warning,
-    flex: 1,
-    marginLeft: spacing.md,
-  },
-  errorText: {
-    ...typography.body,
-    color: colors.error,
-    textAlign: 'center',
-    marginTop: spacing.xxl,
-  },
-  retryButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.lg,
-    alignSelf: 'center',
-  },
-  retryButtonText: {
-    ...typography.h3,
-    fontWeight: 'bold',
   },
 });

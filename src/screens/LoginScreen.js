@@ -11,6 +11,9 @@ import {
     TextInput,
     TouchableOpacity,
     View,
+    Image,
+    Keyboard,
+    TouchableWithoutFeedback,
 } from 'react-native';
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
@@ -21,10 +24,26 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [requestingCode, setRequestingCode] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   // Auto-login se credenziali salvate
   useEffect(() => {
     checkAutoLogin();
+    
+    // Listener per tastiera
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   const checkAutoLogin = async () => {
@@ -117,104 +136,122 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
+    <TouchableWithoutFeedback onPress={dismissKeyboard}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {/* Header con logo */}
-        <View style={styles.header}>
-          <MaterialCommunityIcons name="dumbbell" size={48} color={colors.primary} />
-          <Text style={styles.logoText}>LIFT</Text>
-        </View>
-
-        {/* Titolo */}
-        <Text style={styles.welcomeText}>Bentornato!</Text>
-
-        {/* Form */}
-        <View style={styles.form}>
-          {/* Email Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.input}
-                placeholder="Il tuo indirizzo email"
-                placeholderTextColor={colors.textTertiary}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!loading}
-              />
-            </View>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            keyboardVisible && styles.scrollContentKeyboard
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header con logo - Ridotto quando tastiera è visibile */}
+          <View style={[styles.header, keyboardVisible && styles.headerKeyboard]}>
+            <Image 
+              source={require('../../assets/lift-logo.png')} 
+              style={[styles.logo, keyboardVisible && styles.logoKeyboard]}
+              resizeMode="contain"
+            />
           </View>
 
-          {/* Code Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Codice di Accesso</Text>
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.input}
-                placeholder="Il tuo codice"
-                placeholderTextColor={colors.textTertiary}
-                value={code}
-                onChangeText={(text) => setCode(text.toUpperCase())}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                maxLength={8}
-                editable={!loading}
-              />
+          {/* Titolo - Nascondi quando tastiera è visibile su Android */}
+          {(!keyboardVisible || Platform.OS === 'ios') && (
+            <Text style={styles.welcomeText}>Bentornato!</Text>
+          )}
+
+          {/* Form */}
+          <View style={styles.form}>
+            {/* Email Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Email</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Il tuo indirizzo email"
+                  placeholderTextColor={colors.textTertiary}
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!loading}
+                />
+              </View>
             </View>
-            
-            {/* Richiedi Codice Button */}
+
+            {/* Code Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Codice di Accesso</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Il tuo codice"
+                  placeholderTextColor={colors.textTertiary}
+                  value={code}
+                  onChangeText={(text) => setCode(text.toUpperCase())}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={8}
+                  editable={!loading}
+                />
+              </View>
+              
+              {/* Richiedi Codice Button */}
+              <TouchableOpacity
+                style={styles.requestCodeButton}
+                onPress={handleRequestCode}
+                disabled={requestingCode || loading}
+              >
+                {requestingCode ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.requestCodeText}>
+                    {codeSent ? '📧 Codice inviato! Controlla email' : 'Non hai il codice? Richiedilo'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Login Button */}
             <TouchableOpacity
-              style={styles.requestCodeButton}
-              onPress={handleRequestCode}
-              disabled={requestingCode || loading}
+              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+              onPress={() => handleLogin()}
+              disabled={loading}
             >
-              {requestingCode ? (
-                <ActivityIndicator size="small" color={colors.primary} />
+              {loading ? (
+                <ActivityIndicator size="small" color={colors.textPrimary} />
               ) : (
-                <Text style={styles.requestCodeText}>
-                  {codeSent ? '📧 Codice inviato! Controlla email' : 'Non hai il codice? Richiedilo'}
-                </Text>
+                <Text style={styles.loginButtonText}>Accedi</Text>
               )}
             </TouchableOpacity>
-          </View>
 
-          {/* Login Button */}
-          <TouchableOpacity
-            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-            onPress={() => handleLogin()}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color={colors.textPrimary} />
-            ) : (
-              <Text style={styles.loginButtonText}>Accedi</Text>
+            {/* Info Note - Nascondi quando tastiera è visibile */}
+            {!keyboardVisible && (
+              <View style={styles.infoBox}>
+                <MaterialCommunityIcons 
+                  name="information-outline" 
+                  size={20} 
+                  color={colors.primary} 
+                />
+                <Text style={styles.infoText}>
+                  Il codice ha validità di 24 ore e può essere usato una sola volta
+                </Text>
+              </View>
             )}
-          </TouchableOpacity>
-
-          {/* Info Note */}
-          <View style={styles.infoBox}>
-            <MaterialCommunityIcons 
-              name="information-outline" 
-              size={20} 
-              color={colors.primary} 
-            />
-            <Text style={styles.infoText}>
-              Il codice ha validità di 24 ore e può essere usato una sola volta
-            </Text>
           </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -228,17 +265,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xxl * 2,
     paddingBottom: spacing.xl,
+    justifyContent: 'center',
+  },
+  scrollContentKeyboard: {
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
   },
   header: {
     alignItems: 'center',
     marginBottom: spacing.xxl,
   },
-  logoText: {
-    ...typography.h1,
-    fontSize: 36,
-    fontWeight: 'bold',
-    letterSpacing: 2,
-    marginTop: spacing.md,
+  headerKeyboard: {
+    marginBottom: spacing.lg,
+  },
+  logo: {
+    width: 200,
+    height: 200,
+  },
+  logoKeyboard: {
+    width: 80,
+    height: 80,
   },
   welcomeText: {
     ...typography.h2,

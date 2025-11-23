@@ -3,9 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ⚠️ IMPORTANTE: Questo è il TUO URL dello script Google Apps
 const API_URL = '';
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000;
-const TIMEOUT_MS = 10000;
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 500;
+const TIMEOUT_MS = 8000;
 
 class ApiService {
   /**
@@ -96,7 +96,7 @@ class ApiService {
       
       if (cached && cacheTime) {
         const age = Date.now() - parseInt(cacheTime);
-        if (age < 120000) { // 2 minuti
+        if (age < 300000) { // 2 minuti
           console.log('Using cached slots');
           return JSON.parse(cached);
         }
@@ -168,21 +168,37 @@ class ApiService {
   /**
    * Ottieni dati utente aggiornati
    */
-  async refreshUserData(email, code) {
-    try {
-      const url = `${API_URL}?action=getClientDataWithBookings&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}`;
-      const data = await this.fetchWithRetry(url, { method: 'GET' });
-      
-      if (data.found) {
-        await AsyncStorage.setItem('user_data', JSON.stringify(data));
+ // In api.js, modifica la funzione refreshUserData:
+async refreshUserData(email, code, forceRefresh = false) {
+  try {
+    // ⚡ Salta cache se forceRefresh è true
+    if (!forceRefresh && this.userDataCache && this.cacheTimestamp) {
+      const age = Date.now() - this.cacheTimestamp;
+      if (age < this.CACHE_DURATION) {
+        console.log('⚡ Using cached user data');
+        return this.userDataCache;
       }
-      
-      return data;
-    } catch (error) {
-      console.error('Error refreshing user data:', error);
-      throw new Error('Impossibile aggiornare i dati. Controlla la connessione.');
     }
+
+    const url = `${API_URL}?action=getClientDataWithBookings&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}`;
+    const data = await this.fetchWithRetry(url, { method: 'GET' });
+    
+    if (data.found) {
+      this.userDataCache = data;
+      this.cacheTimestamp = Date.now();
+      await AsyncStorage.setItem('user_data', JSON.stringify(data));
+    }
+    
+    return data;
+  } catch (error) {
+    // Fallback su dati salvati
+    const saved = await AsyncStorage.getItem('user_data');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    throw error;
   }
+}
 
   /**
    * Ottieni comunicazioni attive
@@ -200,6 +216,29 @@ class ApiService {
       return []; // In caso di errore, restituisci array vuoto (non bloccare l'app)
     }
   }
+
+  // Aggiungi al file api.js
+async getAppUpdateInfo() {
+  try {
+    const url = `${API_URL}?action=getAppUpdateInfo`;
+    const data = await this.fetchWithRetry(url, { method: 'GET' });
+    return data;
+  } catch (error) {
+    console.error('Error fetching update info:', error);
+    return { success: false, updateAvailable: false };
+  }
+}
+
+async getPaymentInfo(email) {
+  try {
+    const url = `${API_URL}?action=getPaymentLink&email=${encodeURIComponent(email)}`;
+    const data = await this.fetchWithRetry(url, { method: 'GET' });
+    return data;
+  } catch (error) {
+    console.error('Error fetching payment info:', error);
+    return { success: false, hasPayment: false };
+  }
+}
 
   /**
    * Logout - rimuove dati locali
