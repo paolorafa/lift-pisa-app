@@ -8,6 +8,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
@@ -16,13 +17,16 @@ export default function BookingsScreen({ navigation }) {
   const [bookings, setBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(null);
+  const [reloading, setReloading] = useState(false); // Nuovo stato per il ricaricamento
 
   useEffect(() => {
     loadBookings();
   }, []);
 
-  const loadBookings = async () => {
+  const loadBookings = async (showLoader = false) => {
     try {
+      if (showLoader) setReloading(true);
+      
       const { email, code } = await ApiService.getSavedCredentials();
       const userData = await ApiService.refreshUserData(email, code);
       if (userData.found) {
@@ -30,6 +34,8 @@ export default function BookingsScreen({ navigation }) {
       }
     } catch (_error) {
       console.error('Error loading bookings');
+    } finally {
+      if (showLoader) setReloading(false);
     }
   };
 
@@ -62,7 +68,8 @@ export default function BookingsScreen({ navigation }) {
       
       if (result.success) {
         Alert.alert('Successo ✅', result.message);
-        loadBookings();
+        // Ricarica la lista con loader
+        await loadBookings(true);
       } else {
         Alert.alert('Errore', result.message);
       }
@@ -99,17 +106,40 @@ export default function BookingsScreen({ navigation }) {
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={() => handleCancelBooking(item)}
-          disabled={isCancelling}
+          disabled={isCancelling || reloading} // Disabilita durante il ricaricamento
         >
-          <MaterialCommunityIcons
-            name={isCancelling ? 'loading' : 'delete-outline'}
-            size={24}
-            color={colors.error}
-          />
+          {isCancelling ? (
+            <ActivityIndicator size="small" color={colors.error} />
+          ) : (
+            <MaterialCommunityIcons
+              name="delete-outline"
+              size={24}
+              color={colors.error}
+            />
+          )}
         </TouchableOpacity>
       </View>
     );
   };
+
+  // Mostra loader globale durante il ricaricamento
+  if (reloading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <MaterialCommunityIcons name="arrow-left" size={28} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Le Tue Prenotazioni</Text>
+          <View style={{ width: 28 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Aggiornamento prenotazioni...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -200,6 +230,10 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: spacing.sm,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   emptyState: {
     flex: 1,
@@ -223,5 +257,16 @@ const styles = StyleSheet.create({
   bookNowButtonText: {
     ...typography.h3,
     fontWeight: 'bold',
+  },
+  // Nuovi stili per il loader globale
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
   },
 });
