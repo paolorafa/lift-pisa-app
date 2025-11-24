@@ -86,28 +86,37 @@ class ApiService {
   }
 
   /**
-   * Ottieni slot disponibili con cache
+   * ⚡ MODIFICA: Ottieni slot disponibili con supporto per data specifica
    */
-  async getAvailableSlots() {
+  async getAvailableSlots(targetDate = null) {
     try {
+      // Crea chiave cache basata sulla data
+      const cacheKey = targetDate ? `cached_slots_${targetDate}` : 'cached_slots';
+      const cacheTimeKey = targetDate ? `cache_time_${targetDate}` : 'cache_time';
+      
       // Controlla cache (valida per 2 minuti)
-      const cached = await AsyncStorage.getItem('cached_slots');
-      const cacheTime = await AsyncStorage.getItem('cache_time');
+      const cached = await AsyncStorage.getItem(cacheKey);
+      const cacheTime = await AsyncStorage.getItem(cacheTimeKey);
       
       if (cached && cacheTime) {
         const age = Date.now() - parseInt(cacheTime);
         if (age < 300000) { // 2 minuti
-          console.log('Using cached slots');
+          console.log('Using cached slots for date:', targetDate);
           return JSON.parse(cached);
         }
       }
       
-      const url = `${API_URL}?action=getAvailableSlots`;
+      // ⚡ MODIFICA: Aggiungi targetDate alla richiesta se presente
+      let url = `${API_URL}?action=getAvailableSlots`;
+      if (targetDate) {
+        url += `&targetDate=${targetDate}`;
+      }
+      
       const data = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // Salva in cache
-      await AsyncStorage.setItem('cached_slots', JSON.stringify(data));
-      await AsyncStorage.setItem('cache_time', Date.now().toString());
+      // Salva in cache con chiave specifica per la data
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
+      await AsyncStorage.setItem(cacheTimeKey, Date.now().toString());
       
       return data;
       
@@ -115,9 +124,10 @@ class ApiService {
       console.error('Error fetching slots:', error);
       
       // Fallback su cache vecchia se disponibile
-      const cached = await AsyncStorage.getItem('cached_slots');
+      const cacheKey = targetDate ? `cached_slots_${targetDate}` : 'cached_slots';
+      const cached = await AsyncStorage.getItem(cacheKey);
       if (cached) {
-        console.log('Using old cached slots as fallback');
+        console.log('Using old cached slots as fallback for date:', targetDate);
         return JSON.parse(cached);
       }
       
@@ -126,18 +136,24 @@ class ApiService {
   }
 
   /**
-   * Prenota uno slot
+   * ⚡ MODIFICA: Prenota uno slot con supporto per data specifica
    */
-  async bookSlot(email, code, slotId) {
+  async bookSlot(email, code, slotId, targetDate = null) {
     try {
-      console.log('📝 Prenotazione con codice:', code);
+      console.log('📝 Prenotazione con codice:', code, 'Data:', targetDate);
       
-      const url = `${API_URL}?action=bookSlot&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}&slotId=${slotId}`;
+      // ⚡ MODIFICA: Aggiungi targetDate alla richiesta se presente
+      let url = `${API_URL}?action=bookSlot&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}&slotId=${slotId}`;
+      if (targetDate) {
+        url += `&targetDate=${targetDate}`;
+      }
+      
       const result = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // Invalida cache dopo prenotazione
-      await AsyncStorage.removeItem('cached_slots');
-      await AsyncStorage.removeItem('cache_time');
+      // ⚡ MODIFICA: Invalida tutte le cache degli slot
+      const keys = await AsyncStorage.getAllKeys();
+      const slotCacheKeys = keys.filter(key => key.startsWith('cached_slots') || key.startsWith('cache_time'));
+      await AsyncStorage.multiRemove(slotCacheKeys);
       
       return result;
     } catch (error) {
@@ -154,9 +170,10 @@ class ApiService {
       const url = `${API_URL}?action=cancelBooking&email=${encodeURIComponent(email)}&bookingId=${bookingId}`;
       const result = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // Invalida cache
-      await AsyncStorage.removeItem('cached_slots');
-      await AsyncStorage.removeItem('cache_time');
+      // ⚡ MODIFICA: Invalida tutte le cache degli slot
+      const keys = await AsyncStorage.getAllKeys();
+      const slotCacheKeys = keys.filter(key => key.startsWith('cached_slots') || key.startsWith('cache_time'));
+      await AsyncStorage.multiRemove(slotCacheKeys);
       
       return result;
     } catch (error) {
@@ -168,37 +185,36 @@ class ApiService {
   /**
    * Ottieni dati utente aggiornati
    */
- // In api.js, modifica la funzione refreshUserData:
-async refreshUserData(email, code, forceRefresh = false) {
-  try {
-    // ⚡ Salta cache se forceRefresh è true
-    if (!forceRefresh && this.userDataCache && this.cacheTimestamp) {
-      const age = Date.now() - this.cacheTimestamp;
-      if (age < this.CACHE_DURATION) {
-        console.log('⚡ Using cached user data');
-        return this.userDataCache;
+  async refreshUserData(email, code, forceRefresh = false) {
+    try {
+      // ⚡ Salta cache se forceRefresh è true
+      if (!forceRefresh && this.userDataCache && this.cacheTimestamp) {
+        const age = Date.now() - this.cacheTimestamp;
+        if (age < this.CACHE_DURATION) {
+          console.log('⚡ Using cached user data');
+          return this.userDataCache;
+        }
       }
-    }
 
-    const url = `${API_URL}?action=getClientDataWithBookings&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}`;
-    const data = await this.fetchWithRetry(url, { method: 'GET' });
-    
-    if (data.found) {
-      this.userDataCache = data;
-      this.cacheTimestamp = Date.now();
-      await AsyncStorage.setItem('user_data', JSON.stringify(data));
+      const url = `${API_URL}?action=getClientDataWithBookings&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}`;
+      const data = await this.fetchWithRetry(url, { method: 'GET' });
+      
+      if (data.found) {
+        this.userDataCache = data;
+        this.cacheTimestamp = Date.now();
+        await AsyncStorage.setItem('user_data', JSON.stringify(data));
+      }
+      
+      return data;
+    } catch (error) {
+      // Fallback su dati salvati
+      const saved = await AsyncStorage.getItem('user_data');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+      throw error;
     }
-    
-    return data;
-  } catch (error) {
-    // Fallback su dati salvati
-    const saved = await AsyncStorage.getItem('user_data');
-    if (saved) {
-      return JSON.parse(saved);
-    }
-    throw error;
   }
-}
 
   /**
    * Ottieni comunicazioni attive
@@ -217,41 +233,43 @@ async refreshUserData(email, code, forceRefresh = false) {
     }
   }
 
-  // Aggiungi al file api.js
-async getAppUpdateInfo() {
-  try {
-    const url = `${API_URL}?action=getAppUpdateInfo`;
-    const data = await this.fetchWithRetry(url, { method: 'GET' });
-    return data;
-  } catch (error) {
-    console.error('Error fetching update info:', error);
-    return { success: false, updateAvailable: false };
+  async getAppUpdateInfo() {
+    try {
+      const url = `${API_URL}?action=getAppUpdateInfo`;
+      const data = await this.fetchWithRetry(url, { method: 'GET' });
+      return data;
+    } catch (error) {
+      console.error('Error fetching update info:', error);
+      return { success: false, updateAvailable: false };
+    }
   }
-}
 
-async getPaymentInfo(email) {
-  try {
-    const url = `${API_URL}?action=getPaymentLink&email=${encodeURIComponent(email)}`;
-    const data = await this.fetchWithRetry(url, { method: 'GET' });
-    return data;
-  } catch (error) {
-    console.error('Error fetching payment info:', error);
-    return { success: false, hasPayment: false };
+  async getPaymentInfo(email) {
+    try {
+      const url = `${API_URL}?action=getPaymentLink&email=${encodeURIComponent(email)}`;
+      const data = await this.fetchWithRetry(url, { method: 'GET' });
+      return data;
+    } catch (error) {
+      console.error('Error fetching payment info:', error);
+      return { success: false, hasPayment: false };
+    }
   }
-}
 
   /**
    * Logout - rimuove dati locali
    */
   async logout() {
     try {
-      await AsyncStorage.multiRemove([
+      // ⚡ MODIFICA: Rimuove tutte le cache degli slot
+      const keys = await AsyncStorage.getAllKeys();
+      const allKeys = [
         'user_email',
-        'user_code',
+        'user_code', 
         'user_data',
-        'cached_slots',
-        'cache_time'
-      ]);
+        ...keys.filter(key => key.startsWith('cached_slots') || key.startsWith('cache_time'))
+      ];
+      
+      await AsyncStorage.multiRemove(allKeys);
     } catch (error) {
       console.error('Error during logout:', error);
     }
@@ -285,6 +303,11 @@ async getPaymentInfo(email) {
       return { email: null, code: null };
     }
   }
+
+  // ⚡ AGGIUNGI: Costanti per cache
+  CACHE_DURATION = 300000; // 5 minuti
+  userDataCache = null;
+  cacheTimestamp = null;
 }
 
 export default new ApiService();

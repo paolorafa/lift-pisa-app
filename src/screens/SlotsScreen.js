@@ -24,7 +24,7 @@ export default function SlotsScreen({ navigation, route }) {
 
   useEffect(() => {
     loadSlots();
-  }, []);
+  }, [data]); // ⚡ AGGIUNTA: Ricarica quando cambia la data
 
   useEffect(() => {
     if (giorno && slots.length > 0) {
@@ -35,8 +35,9 @@ export default function SlotsScreen({ navigation, route }) {
   const loadSlots = async () => {
     try {
       setLoading(true);
-      const data = await ApiService.getAvailableSlots();
-      setSlots(data);
+      // ⚡ MODIFICA: Passa la data specifica al backend
+      const dataSlots = await ApiService.getAvailableSlots(data);
+      setSlots(dataSlots);
     } catch (error) {
       Alert.alert('Errore', error.message);
     } finally {
@@ -55,25 +56,26 @@ export default function SlotsScreen({ navigation, route }) {
       setFilteredSlots(slots);
       return;
     }
-      const today = new Date();
-  const isToday = data === today.toISOString().split("T")[0];
+    
+    const today = new Date();
+    const isToday = data === today.toISOString().split("T")[0];
 
-  const filtered = slots
-    .filter(slot => slot.Giorno === giorno)
-    .filter(slot => {
-      if (!isToday) return true; // Giorni futuri → nessun filtro
+    const filtered = slots
+      .filter(slot => slot.Giorno === giorno)
+      .filter(slot => {
+        if (!isToday) return true; // Giorni futuri → nessun filtro
 
-      // Giorno di oggi → applica filtro "2 ore prima"
-      const nowMinutes = today.getHours() * 60 + today.getMinutes();
-      const minAllowedMinutes = nowMinutes + 120; // +2 ore
+        // Giorno di oggi → applica filtro "2 ore prima"
+        const nowMinutes = today.getHours() * 60 + today.getMinutes();
+        const minAllowedMinutes = nowMinutes + 120; // +2 ore
 
-      const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
-      const slotMinutes = startHour * 60 + startMin;
+        const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
+        const slotMinutes = startHour * 60 + startMin;
 
-      return slotMinutes >= minAllowedMinutes;
-    });
+        return slotMinutes >= minAllowedMinutes;
+      });
 
-  setFilteredSlots(filtered);
+    setFilteredSlots(filtered);
   };
 
   // ⚡ NUOVA FUNZIONE: Estrae la data dalla descrizione
@@ -112,33 +114,36 @@ export default function SlotsScreen({ navigation, route }) {
   };
 
   const confirmBooking = async (slot) => {
-    setBooking(slot.ID_Spazio);
-    try {
-      const { email, code } = await ApiService.getSavedCredentials();
-      const result = await ApiService.bookSlot(email, code, slot.ID_Spazio);
-      
-      if (result.success) {
-        Alert.alert(
-          'Prenotazione Confermata! ✅',
-          result.message,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                navigation.navigate('Home');
-              },
+  setBooking(slot.ID_Spazio);
+  try {
+    const { email, code } = await ApiService.getSavedCredentials();
+    // ⚡ MODIFICA: Passa la data specifica alla prenotazione
+    const result = await ApiService.bookSlot(email, code, slot.ID_Spazio, data);
+    
+    if (result.success) {
+      Alert.alert(
+        'Prenotazione Confermata! ✅',
+        result.message,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // ⚡ MODIFICA: Rimani nella schermata e ricarica gli slot
+              loadSlots(); // Ricarica gli slot aggiornati
+              setBooking(null);
             },
-          ]
-        );
-      } else {
-        Alert.alert('Errore', result.message);
-      }
-    } catch (error) {
-      Alert.alert('Errore', error.message);
-    } finally {
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Errore', result.message);
       setBooking(null);
     }
-  };
+  } catch (error) {
+    Alert.alert('Errore', error.message);
+    setBooking(null);
+  }
+};
 
   const getSlotStatus = (description) => {
     const slotInfo = extractSlotInfo(description);
@@ -158,9 +163,6 @@ export default function SlotsScreen({ navigation, route }) {
 
     return (
       <View style={styles.slotCard}>
-        <View style={styles.slotIcon}>
-          <MaterialCommunityIcons name="clock-outline" size={24} color={colors.primary} />
-        </View>
         
         <View style={styles.slotDetails}>
           <Text style={styles.slotTime}>
@@ -214,6 +216,16 @@ export default function SlotsScreen({ navigation, route }) {
         <Text style={styles.headerTitle}>Scegli lo Slot</Text>
         <View style={{ width: 28 }} />
       </View>
+
+      {/* Info Box con data selezionata */}
+      {data && (
+        <View style={styles.infoBox}>
+          <MaterialCommunityIcons name="calendar-check" size={20} color={colors.primary} />
+          <Text style={styles.infoText}>
+            Visualizzando gli slot per: <Text style={{fontWeight: 'bold'}}>{dataFormattata || data}</Text>
+          </Text>
+        </View>
+      )}
 
       {/* Slots List */}
       <FlatList

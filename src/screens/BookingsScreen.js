@@ -17,18 +17,21 @@ export default function BookingsScreen({ navigation }) {
   const [bookings, setBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(null);
-  const [reloading, setReloading] = useState(false); // Nuovo stato per il ricaricamento
+  const [reloading, setReloading] = useState(false);
 
   useEffect(() => {
     loadBookings();
   }, []);
 
-  const loadBookings = async (showLoader = false) => {
+  const loadBookings = async (showLoader = false, forceRefresh = false) => {
     try {
       if (showLoader) setReloading(true);
       
       const { email, code } = await ApiService.getSavedCredentials();
-      const userData = await ApiService.refreshUserData(email, code);
+      
+      // ⚡ MODIFICA: Forza il refresh dei dati
+      const userData = await ApiService.refreshUserData(email, code, forceRefresh);
+      
       if (userData.found) {
         setBookings(userData.bookings || []);
       }
@@ -41,7 +44,7 @@ export default function BookingsScreen({ navigation }) {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadBookings();
+    await loadBookings(false, true); // ⚡ Forza refresh
     setRefreshing(false);
   };
 
@@ -68,8 +71,8 @@ export default function BookingsScreen({ navigation }) {
       
       if (result.success) {
         Alert.alert('Successo ✅', result.message);
-        // Ricarica la lista con loader
-        await loadBookings(true);
+        // ⚡ MODIFICA: Forza il refresh completo
+        await loadBookings(true, true);
       } else {
         Alert.alert('Errore', result.message);
       }
@@ -106,7 +109,7 @@ export default function BookingsScreen({ navigation }) {
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={() => handleCancelBooking(item)}
-          disabled={isCancelling || reloading} // Disabilita durante il ricaricamento
+          disabled={isCancelling || reloading}
         >
           {isCancelling ? (
             <ActivityIndicator size="small" color={colors.error} />
@@ -155,9 +158,16 @@ export default function BookingsScreen({ navigation }) {
         data={bookings}
         renderItem={renderBooking}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[
+          styles.listContainer,
+          bookings.length === 0 && styles.emptyListContainer // ⚡ AGGIUNTA
+        ]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            tintColor={colors.primary} 
+          />
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
@@ -198,6 +208,11 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     flexGrow: 1,
   },
+  // ⚡ AGGIUNTA: Stile per lista vuota
+  emptyListContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
   bookingCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -236,7 +251,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyState: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: spacing.xxl * 2,
@@ -258,7 +272,6 @@ const styles = StyleSheet.create({
     ...typography.h3,
     fontWeight: 'bold',
   },
-  // Nuovi stili per il loader globale
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
