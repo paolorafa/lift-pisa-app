@@ -2,8 +2,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Platform, View, Text, StyleSheet } from 'react-native';
-import { useEffect, useState } from 'react'; // ✅ CORRETTO: import da 'react'
+import { Platform, View, Text, StyleSheet, Animated } from 'react-native';
+import { useEffect, useState, useRef } from 'react'; // ✅ Aggiungi useRef
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
 import ApiService from '../services/api';
@@ -36,12 +36,101 @@ function BookingStackScreen() {
   );
 }
 
+// 🔔 Componente Icona con Campanella Animata
+function AnimatedBellIcon({ color, size, hasPendingPayment }) {
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (hasPendingPayment) {
+      // Animazione continua della campanella
+      const startAnimation = () => {
+        Animated.sequence([
+          // Rotazione sinistra
+          Animated.timing(rotateAnim, {
+            toValue: -0.3,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          // Rotazione destra
+          Animated.timing(rotateAnim, {
+            toValue: 0.3,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          // Ritorno al centro
+          Animated.timing(rotateAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          // Piccolo scale per effetto "vibrazione"
+          Animated.sequence([
+            Animated.timing(scaleAnim, {
+              toValue: 1.2,
+              duration: 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(scaleAnim, {
+              toValue: 1,
+              duration: 100,
+              useNativeDriver: true,
+            }),
+          ]),
+        ]).start(() => {
+          // Ripeti dopo 3 secondi
+          setTimeout(startAnimation, 3000);
+        });
+      };
+
+      startAnimation();
+    } else {
+      // Ferma le animazioni
+      rotateAnim.setValue(0);
+      scaleAnim.setValue(1);
+    }
+  }, [hasPendingPayment]);
+
+  const rotateStyle = {
+    transform: [
+      { rotate: rotateAnim.interpolate({
+        inputRange: [-1, 1],
+        outputRange: ['-30deg', '30deg']
+      })},
+      { scale: scaleAnim }
+    ]
+  };
+
+  return (
+    <View style={styles.iconContainer}>
+      <Animated.View style={hasPendingPayment ? rotateStyle : null}>
+        <MaterialCommunityIcons 
+          name={hasPendingPayment ? "bell-ring" : "bell"} 
+          size={size} 
+          color={color} 
+        />
+      </Animated.View>
+      
+      {hasPendingPayment && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>!</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function MainTabs() {
   const insets = useSafeAreaInsets();
   const [hasPendingPayment, setHasPendingPayment] = useState(false);
   
   useEffect(() => {
     checkForPayments();
+    
+    // Controlla i pagamenti ogni 2 minuti quando l'app è in foreground
+    const interval = setInterval(checkForPayments, 120000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const checkForPayments = async () => {
@@ -57,10 +146,10 @@ function MainTabs() {
       
       if (result.success && result.hasPayment) {
         setHasPendingPayment(true);
-        console.log('✅ Badge pagamento ATTIVATO - Pagamento pendente');
+        console.log('🔔 Campanella ATTIVATA - Pagamento pendente');
       } else {
         setHasPendingPayment(false);
-        console.log('❌ Badge pagamento DISATTIVATO - Nessun pagamento');
+        console.log('🔔 Campanella DISATTIVATA - Nessun pagamento');
       }
     } catch (error) {
       console.error('Errore controllo pagamenti:', error);
@@ -76,7 +165,6 @@ function MainTabs() {
           backgroundColor: colors.backgroundLight,
           borderTopColor: colors.cardBorder,
           borderTopWidth: 1,
-          // ⭐ Altezza dinamica basata su safe area
           height: 60 + insets.bottom,
           paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
@@ -110,7 +198,7 @@ function MainTabs() {
         }}
       />
       
-      {/* 🔥 TAB PAGAMENTI SEMPRE VISIBILE CON BADGE */}
+      {/* 🔥 TAB PAGAMENTI CON CAMPANELLA ANIMATA */}
       <Tab.Screen
         name="Payments"
         component={PaymentsScreen}
@@ -119,22 +207,19 @@ function MainTabs() {
             // Ricarica i dati quando si clicca sul tab
             checkForPayments();
           },
+          focus: () => {
+            // Ricarica anche quando si naviga verso questo tab
+            checkForPayments();
+          },
         }}
         options={{
           tabBarLabel: hasPendingPayment ? 'Pagamento 🔔' : 'Pagamenti',
           tabBarIcon: ({ color, size }) => (
-            <View style={styles.iconContainer}>
-              <MaterialCommunityIcons 
-                name="credit-card" 
-                size={size} 
-                color={color} 
-              />
-              {hasPendingPayment && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>!</Text>
-                </View>
-              )}
-            </View>
+            <AnimatedBellIcon 
+              color={color} 
+              size={size} 
+              hasPendingPayment={hasPendingPayment}
+            />
           ),
         }}
       />
@@ -164,7 +249,7 @@ function MainTabs() {
   );
 }
 
-// Stili per il badge
+// Stili aggiornati
 const styles = StyleSheet.create({
   iconContainer: {
     position: 'relative',
@@ -181,6 +266,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.backgroundLight,
+    zIndex: 1,
   },
   badgeText: {
     color: colors.textPrimary,

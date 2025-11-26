@@ -1,12 +1,12 @@
 // ========================================
 // LIFT PRENOTAZIONI - GOOGLE APPS SCRIPT
-// Versione 2.4 - PERFORMANCE OTTIMIZZATA
+// Versione 2.5 - SUPPORTO DATE FUTURE
 // ========================================
 
 // === CONFIGURAZIONE ===
 const SECURITY_CONFIG = {
   MAX_CODE_REQUESTS: 30,
-  CODE_REQUEST_LOCKOUT_MINUTES: 60,
+  CODE_REQUEST_LOCKOUT_MINUTES: 15,
   TEMP_CODE_VALIDITY_HOURS: 24,   
   ADMIN_EMAIL: 'pisalift@gmail.com'
 };
@@ -68,6 +68,385 @@ class SpreadsheetManager {
     delete CACHE.timestamp[cacheKey];
   }
 }
+
+// ⚡ NUOVA FUNZIONE: Calcola data specifica per il calendario
+function getSpecificSlotDate(dayName, slotTime, targetDate) {
+  const days = { 
+    "Domenica": 0, "Lunedì": 1, "Martedì": 2, "Mercoledì": 3, 
+    "Giovedì": 4, "Venerdì": 5, "Sabato": 6 
+  };
+  
+  const target = new Date(targetDate);
+  const targetDay = target.getDay();
+  const slotDay = days[dayName];
+  
+  // Calcola la differenza per arrivare al giorno corretto nella settimana del target
+  let diff = slotDay - targetDay;
+  
+  const specificDate = new Date(target);
+  specificDate.setDate(target.getDate() + diff);
+  
+  // Imposta l'orario dello slot
+  const [hours, minutes] = slotTime.split(':').map(Number);
+  specificDate.setHours(hours, minutes || 0, 0, 0);
+  
+  return specificDate;
+}
+
+// ⚡ FUNZIONE ORIGINALE: Calcola prossima occorrenza
+function getNextSlotDate(dayName, slotTime) {
+  const days = { 
+    "Domenica": 0, "Lunedì": 1, "Martedì": 2, "Mercoledì": 3, 
+    "Giovedì": 4, "Venerdì": 5, "Sabato": 6 
+  };
+  
+  const today = new Date();
+  const todayDay = today.getDay();
+  const slotDay = days[dayName];
+  
+  let diff = slotDay - todayDay;
+  if (diff < 0) diff += 7;
+  
+  const currentHour = today.getHours();
+  const slotHour = parseInt(slotTime.split(':')[0]);
+  
+  if (diff === 0 && currentHour >= (slotHour - 2)) {
+    diff += 7;
+  }
+
+  const targetDate = new Date(today);
+  targetDate.setDate(today.getDate() + diff);
+  targetDate.setHours(0, 0, 0, 0);
+  return targetDate;
+}
+
+// ⚡ MODIFICA: Get Available Slots con supporto targetDate
+function getAvailableSlots(targetDate = null) {
+  try {
+    const sm = new SpreadsheetManager();
+    
+    // ⚡ Usa dati cached
+    const slotsData = sm.getCachedData('SpaziOrari');
+    const prenData = sm.getCachedData('Prenotazioni');
+    
+    if(!slotsData || slotsData.length <= 1) return [];
+
+    // ⚡ MODIFICA: Se c'è una targetDate, usa quella, altrimenti settimana corrente
+    const slots = slotsData.slice(1).map(row => {
+      let slotDate;
+      if (targetDate) {
+        // Usa la data specifica dal calendario
+        slotDate = getSpecificSlotDate(row[1], row[2], targetDate);
+      } else {
+        // Comportamento originale per oggi/settimana corrente
+        slotDate = getNextSlotDate(row[1], row[2]);
+      }
+      
+      return {
+        ID_Spazio: row[0],
+        Giorno: row[1],
+        Ora_Inizio: row[2],
+        Ora_Fine: row[3],
+        Descrizione: row[1] + " " + row[2] + "-" + row[3],
+        DataCalcolata: slotDate
+      };
+    });
+
+    return filterAvailableSlotsWithCount(slots, prenData ? prenData.slice(1) : [], targetDate);
+    
+  } catch(error) {
+    Logger.log('Errore in getAvailableSlots: ' + error.toString());
+    return [];
+  }
+}
+
+// ⚡ MODIFICA: Filtra slot con supporto per date specifiche e controllo orario corretto
+function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinutes = now.getMinutes();
+
+  // ⚡ Pre-calcola conteggi in un'unica passata
+  const bookingCounts = {};
+  
+  if(prenData && prenData.length > 0) {
+    for(const pren of prenData) {
+      if(!pren[4] || !pren[8]) continue;
+      
+      const slotId = pren[4];
+      const bookingDate = parseDateItalian(pren[8]);
+      if(!bookingDate) continue;
+      
+      const dateKey = formatDateForComparison(bookingDate);
+      const countKey = `${slotId}_${dateKey}`;
+      
+      bookingCounts[countKey] = (bookingCounts[countKey] || 0) + 1;
+    }
+  }
+  
+  // ⚡ Filtra con conteggi pre-calcolati
+  return slots.filter(slot => {
+    const slotHour = parseInt(slot.Ora_Inizio.toString().split(':')[0]);
+    
+    // Controlli base sugli orari
+    if(slotHour < 6 || slotHour >= 21) return false;
+    
+    const slotDate = slot.DataCalcolata;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const slotDateOnly = new Date(slotDate);
+    slotDateOnly.setHours(0, 0, 0, 0);
+    
+    // ⚡ MODIFICA: Controllo "oggi" - se è oggi, applica regola "fino alle 16 per slot delle 6"
+    const isToday = slotDateOnly.getTime() === today.getTime();
+    if(isToday) {
+      // Se è slot delle 6-7, blocca dopo le 16 del giorno prima
+      if(slotHour === 6 && currentHour >= 16) {
+        return false;
+      }
+      
+      // Per tutti gli altri slot, regola standard "2 ore prima"
+      const nowTotalMinutes = currentHour * 60 + currentMinutes;
+      const [startHour, startMin] = slot.Ora_Inizio.split(':').map(Number);
+      const slotTotalMinutes = startHour * 60 + (startMin || 0);
+      
+      if(slotTotalMinutes - nowTotalMinutes < 120) { // Meno di 2 ore
+        return false;
+      }
+    }
+    
+    // ⚡ MODIFICA: Se siamo dopo le 21, blocca solo gli slot di domani mattina presto (solo per oggi)
+    if (!targetDate && currentHour >= 21) {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      const isTomorrow = slotDateOnly.getTime() === tomorrow.getTime();
+      if (isTomorrow && slotHour < 7) {
+        return false;
+      }
+    }
+    
+    const slotDateString = formatDateForComparison(slotDate);
+    const countKey = `${slot.ID_Spazio}_${slotDateString}`;
+    const count = bookingCounts[countKey] || 0;
+    
+    const status = count >= 8 ? "COMPLETO" : "disponibile";
+    slot.Descrizione = `${slot.Giorno} ${slot.Ora_Inizio}-${slot.Ora_Fine} (${count}/8 - ${status} - ${formatBookingDate(slotDate)})`;
+    
+    return count < 8;
+  });
+}
+
+// ⚡ MODIFICA: Prenota slot con controllo limite SETTIMANALE
+function bookSlot(email, slotId, clientId = null, targetDate = null) {
+  try {
+    const clientData = verificaCliente(email, clientId);
+    if(!clientData.found) {
+      return {success: false, message: clientData.error};
+    }
+    
+    if(!clientData.isPaid) {
+      return {success: false, message: "⚠️ Non puoi prenotare: abbonamento non pagato."};
+    }
+    
+    if(clientData.certificateExpired) {
+      return {success: false, message: "Certificato medico scaduto"};
+    }
+
+    const sm = new SpreadsheetManager();
+    
+    // ⚡ Ottieni dati cached
+    const slotsData = sm.getCachedData('SpaziOrari');
+    const prenData = sm.getCachedData('Prenotazioni');
+    
+    // Trova slot
+    const slot = slotsData.slice(1).find(r => r[0] == slotId);
+    if(!slot) {
+      return {success: false, message: "Slot non trovato"};
+    }
+    
+    // ⚡ Calcola la data corretta dello slot
+    let slotDate;
+    if (targetDate) {
+      // Usa la data specifica dal calendario
+      slotDate = getSpecificSlotDate(slot[1], slot[2], targetDate);
+    } else {
+      // Comportamento originale
+      slotDate = getNextSlotDate(slot[1], slot[2]);
+    }
+    
+    // ⭐⭐ CONTROLLO LIMITE PER LA SETTIMANA DELLO SLOT ⭐⭐
+    const weeklyBookings = countWeeklyBookings(email, slotDate); // Passa la data dello slot!
+    
+    // Controlla se ha superato il limite dell'abbonamento per QUELLA settimana
+    if (clientData.frequenza && clientData.frequenza !== "Open") {
+      const frequenzaNum = parseInt(clientData.frequenza);
+      if (!isNaN(frequenzaNum) && weeklyBookings >= frequenzaNum) {
+        const slotWeek = getWeekNumber(slotDate);
+        return {
+          success: false, 
+          message: `❌ LIMITE SETTIMANALE RAGGIUNTO! Hai già ${weeklyBookings} prenotazioni su ${frequenzaNum} disponibili per la settimana del ${formatDate(slotDate)}.`
+        };
+      }
+    }
+    
+    const slotDateString = formatDateForComparison(slotDate);
+    
+    // ⚡ Controllo duplicati e disponibilità slot (resta uguale)
+    let count = 0;
+    const emailLower = email.toLowerCase();
+    let hasDuplicate = false;
+    
+    if(prenData && prenData.length > 1) {
+      for(let i = 1; i < prenData.length; i++) {
+        const booking = prenData[i];
+        if(booking[4] != slotId) continue;
+        
+        if(booking[8]) {
+          const bookingDate = parseDateItalian(booking[8]);
+          if(formatDateForComparison(bookingDate) === slotDateString) {
+            count++;
+            
+            // Check duplicato stesso utente
+            if(booking[1]?.toString().toLowerCase() === emailLower) {
+              hasDuplicate = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    if(hasDuplicate) {
+      return {success: false, message: '❌ Hai già prenotato questo slot!'};
+    }
+    
+    if(count >= 8) {
+      return {success: false, message: "❌ SLOT COMPLETO"};
+    }
+    
+    // Crea prenotazione
+    const prenSheet = sm.getSheet('Prenotazioni');
+    const newRow = [
+      Utilities.getUuid(),
+      clientData.email,
+      clientData.nome,
+      clientData.cognome,
+      slot[0],
+      slot[1],
+      slot[2],
+      slot[3],
+      slotDate
+    ];
+    
+    prenSheet.appendRow(newRow);
+    
+    // ⚡ Invalida cache
+    sm.invalidateCache('Prenotazioni');
+    
+    // Calcola le prenotazioni rimanenti per quella settimana
+    const remaining = clientData.frequenza !== "Open" ? 
+                     parseInt(clientData.frequenza) - (weeklyBookings + 1) : -1;
+    
+    let successMessage = `✅ Prenotazione completata: ${slot[1]} ${slot[2]}-${slot[3]} (${formatBookingDate(slotDate)})`;
+    
+    if (remaining >= 0) {
+      successMessage += `\n📊 Ti rimangono ${remaining} prenotazioni per questa settimana.`;
+    }
+    
+    return {
+      success: true, 
+      message: successMessage
+    };
+    
+  } catch(error) {
+    Logger.log('Errore in bookSlot: ' + error.toString());
+    return {success: false, message: "Errore durante la prenotazione"};
+  }
+}
+
+// ⚡ MODIFICA: HandleRequest per gestire targetDate
+function handleRequest(e) {
+  try {
+    let result = {};
+    
+    if (e && e.parameter && e.parameter.action) {
+      const action = e.parameter.action;
+      
+      switch(action) {
+        case "getAvailableSlots":
+          // ⚡ MODIFICA: Supporta targetDate parameter
+          const targetDate = e.parameter.targetDate || null;
+          result = getAvailableSlots(targetDate);
+          break;
+          
+        case "sendClientCode":
+          result = sendClientCode(e.parameter.email);
+          break;
+          
+        case "getClientDataWithBookings":
+          result = getClientDataWithBookings(
+            e.parameter.email,
+            e.parameter.clientId || e.parameter.code
+          );
+          break;
+          
+        case "bookSlot":
+          // ⚡ MODIFICA: Aggiungi targetDate alla prenotazione
+          const bookingTargetDate = e.parameter.targetDate || null;
+          result = bookSlot(
+            e.parameter.email, 
+            e.parameter.slotId, 
+            e.parameter.clientId || e.parameter.code,
+            bookingTargetDate
+          );
+          break;
+          
+        case "cancelBooking":
+          result = cancelBooking(
+            e.parameter.bookingId, 
+            e.parameter.email
+          );
+          break;
+
+        case "getCommunications":
+          result = getActiveCommunications();
+          break;
+
+        case "getAppUpdateInfo":
+          result = getAppUpdateInfo();
+          break;
+
+        case "getPaymentLink":
+          result = getPaymentLink(e.parameter.email);
+          break;
+          
+        default:
+          result = {error: "Azione non valida: " + action};
+      }
+    } else {
+      result = {
+        status: 'ok', 
+        message: 'API Sistema Prenotazione attiva',
+        version: '2.5-DATE-FUTURE',
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    // ⚡ Flush logs prima di ritornare
+    flushLogs();
+    
+    return createCorsResponse(result);
+    
+  } catch (error) {
+    Logger.log('ERRORE CRITICO in handleRequest: ' + error.toString());
+    return createCorsResponse({
+      error: "Errore interno del server",
+      details: error.toString()
+    });
+  }
+}
+
+// === FUNZIONI ESISTENTI (RIMANGONO UGUALI) ===
 
 // ⚡ OTTIMIZZATO: Batch delle operazioni di log
 const LOG_BUFFER = [];
@@ -157,23 +536,24 @@ function verifyTempCode(email, inputCode) {
   }
 }
 
-// ⚡ OTTIMIZZATO: Conta prenotazioni con meno iterazioni
-function countWeeklyBookings(email, ss) {
+// ⚡ MODIFICA: Conta prenotazioni per una SETTIMANA SPECIFICA
+function countWeeklyBookings(email, targetDate = null) {
   try {
     const sm = new SpreadsheetManager();
     const prenData = sm.getCachedData('Prenotazioni');
     
     if(!prenData || prenData.length <= 1) return 0;
     
-    const today = new Date();
-    const currentWeek = getWeekNumber(today);
-    const currentYear = today.getFullYear();
-    const emailLower = email.toLowerCase();
+    // Se non viene passata una data target, usa la data corrente
+    const referenceDate = targetDate ? new Date(targetDate) : new Date();
+    const targetWeek = getWeekNumber(referenceDate);
+    const targetYear = referenceDate.getFullYear();
     
+    const emailLower = email.toLowerCase();
     let count = 0;
     
-    // ⚡ Parti dal fondo (prenotazioni più recenti)
-    for(let i = prenData.length - 1; i >= 1; i--) {
+    // ⚡ Controlla TUTTE le prenotazioni per trovare quelle della settimana target
+    for(let i = 1; i < prenData.length; i++) {
       const row = prenData[i];
       
       // Skip se email diversa
@@ -185,20 +565,16 @@ function countWeeklyBookings(email, ss) {
       const bookingDate = new Date(row[8]);
       if(isNaN(bookingDate.getTime())) continue;
       
-      // Se è settimana precedente, possiamo fermarci
+      // Controlla se è nella stessa settimana e anno
       const bookingWeek = getWeekNumber(bookingDate);
       const bookingYear = bookingDate.getFullYear();
       
-      if(bookingYear < currentYear || 
-         (bookingYear === currentYear && bookingWeek < currentWeek)) {
-        break; // ⚡ Ferma il ciclo, non servono altre
-      }
-      
-      if(bookingYear === currentYear && bookingWeek === currentWeek) {
+      if(bookingYear === targetYear && bookingWeek === targetWeek) {
         count++;
       }
     }
     
+    Logger.log(`📊 ${email}: ${count} prenotazioni nella settimana ${targetWeek} del ${targetYear}`);
     return count;
     
   } catch(error) {
@@ -207,61 +583,22 @@ function countWeeklyBookings(email, ss) {
   }
 }
 
-// ⚡ OTTIMIZZATO: Filtra slot con meno calcoli
-function filterAvailableSlotsWithCount(slots, prenData) {
-  const now = new Date();
-  const currentHour = now.getHours();
-  const dayMap = { "Domenica":0, "Lunedì":1, "Martedì":2, "Mercoledì":3, "Giovedì":4, "Venerdì":5, "Sabato":6 };
-
-  // ⚡ Pre-calcola conteggi in un'unica passata
-  const bookingCounts = {};
-  
-  if(prenData && prenData.length > 0) {
-    for(const pren of prenData) {
-      if(!pren[4] || !pren[8]) continue;
-      
-      const slotId = pren[4];
-      const bookingDate = parseDateItalian(pren[8]);
-      if(!bookingDate) continue;
-      
-      const dateKey = formatDateForComparison(bookingDate);
-      const countKey = `${slotId}_${dateKey}`;
-      
-      bookingCounts[countKey] = (bookingCounts[countKey] || 0) + 1;
-    }
-  }
-  
-  // ⚡ Filtra con conteggi pre-calcolati
-  return slots.filter(slot => {
-    const slotHour = parseInt(slot.Ora_Inizio.toString().split(':')[0]);
-    
-    if(slotHour < 6 || slotHour >= 21) return false;
-    if(currentHour >= 21 && slotHour < 7) return false;
-    
-    const slotDate = getNextSlotDate(slot.Giorno, slot.Ora_Inizio);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const slotDateOnly = new Date(slotDate);
-    slotDateOnly.setHours(0, 0, 0, 0);
-    
-    const isToday = slotDateOnly.getTime() === today.getTime();
-    if(isToday && currentHour >= (slotHour - 2)) return false;
-    
-    const slotDateString = formatDateForComparison(slotDate);
-    const countKey = `${slot.ID_Spazio}_${slotDateString}`;
-    const count = bookingCounts[countKey] || 0;
-    
-    const status = count >= 8 ? "COMPLETO" : "disponibile";
-    slot.Descrizione = `${slot.Giorno} ${slot.Ora_Inizio}-${slot.Ora_Fine} (${count}/8 - ${status} - ${formatBookingDate(slotDate)})`;
-    
-    return count < 8;
-  });
-}
-
 // ⚡ OTTIMIZZATO: Verifica cliente veloce
 function verificaCliente(email, clientId = null) {
   try {
     Logger.log('⚡ Verifica veloce per: ' + email);
+    
+    // ⚡ AGGIUNTA: Controllo sicurezza per login con messaggio specifico
+    if (clientId) {
+      const loginLimitCheck = checkSecurityLimit(email, 'LOGIN');
+      if (!loginLimitCheck.allowed) {
+        logDebug(email, 'LOGIN', 'BLOCCATO', 'Troppi tentativi falliti');
+        return { 
+          found: false, 
+          error: "🔒 Account temporaneamente bloccato. Hai superato il numero massimo di tentativi. Riprova tra 15 minuti." 
+        };
+      }
+    }
     
     const clientInfo = findClientByEmail(email);
     
@@ -294,7 +631,10 @@ function verificaCliente(email, clientId = null) {
       
       if(!codeValid) {
         logDebug(email, 'LOGIN', 'CODICE_ERRATO', 'Input: ' + idInput);
-        return { found: false, error: "Codice non corretto o scaduto" };
+        return { 
+          found: false, 
+          error: "❌ Codice non corretto. Controlla di averlo inserito correttamente." 
+        };
       }
       
       if(usedTempCode) {
@@ -370,7 +710,7 @@ function verificaCliente(email, clientId = null) {
       }
     }
     
-    // ⚡ Usa prima riga per trovare colonna frequenza
+   // ⚡ Usa prima riga per trovare colonna frequenza
     const headers = CACHE.data.main ? CACHE.data.main[0] : [];
     const freqIndex = headers.findIndex(h => 
       h.toString().toLowerCase().includes('frequenza') && 
@@ -380,9 +720,20 @@ function verificaCliente(email, clientId = null) {
     clientData.frequenza = (freqIndex >= 0 && clientRow[freqIndex]) ? 
                           clientRow[freqIndex].toString() : "Open";
     
-    if(!clientData.isBlocked && !clientData.certificateExpired && clientData.isPaid) {
-      const sm = new SpreadsheetManager();
-      clientData.weeklyBookings = countWeeklyBookings(email, sm.ss);
+    // ⭐⭐ MODIFICA: Calcola prenotazioni per la SETTIMANA CORRENTE ⭐⭐
+    const currentWeekBookings = countWeeklyBookings(email, new Date());
+    clientData.weeklyBookings = currentWeekBookings;
+    
+    // ⭐⭐ MODIFICA: Calcola prenotazioni rimanenti per la settimana corrente ⭐⭐
+    if (clientData.frequenza && clientData.frequenza !== "Open") {
+      const frequenzaNum = parseInt(clientData.frequenza);
+      if (!isNaN(frequenzaNum)) {
+        clientData.remainingBookings = Math.max(0, frequenzaNum - currentWeekBookings);
+        clientData.limitReached = currentWeekBookings >= frequenzaNum;
+      }
+    } else {
+      clientData.remainingBookings = -1; // Illimitato
+      clientData.limitReached = false;
     }
     
     return clientData;
@@ -393,98 +744,63 @@ function verificaCliente(email, clientId = null) {
   }
 }
 
-// ⚡ OTTIMIZZATO: Prenota slot più veloce
-function bookSlot(email, slotId, clientId = null) {
+// ⚡ NUOVA FUNZIONE: Ottieni info prenotazioni per una settimana specifica
+function getWeeklyBookingInfo(email, targetDate = null) {
   try {
-    const clientData = verificaCliente(email, clientId);
-    if(!clientData.found) {
-      return {success: false, message: clientData.error};
+    const referenceDate = targetDate ? new Date(targetDate) : new Date();
+    const weekNumber = getWeekNumber(referenceDate);
+    const year = referenceDate.getFullYear();
+    
+    const weeklyBookings = countWeeklyBookings(email, referenceDate);
+    
+    // Trova la frequenza dell'abbonamento
+    const clientInfo = findClientByEmail(email);
+    let frequenza = "Open";
+    
+    if (clientInfo && clientInfo.row) {
+      const headers = CACHE.data.main ? CACHE.data.main[0] : [];
+      const freqIndex = headers.findIndex(h => 
+        h.toString().toLowerCase().includes('frequenza') && 
+        h.toString().toLowerCase().includes('abbonamento')
+      );
+      
+      frequenza = (freqIndex >= 0 && clientInfo.row[freqIndex]) ? 
+                  clientInfo.row[freqIndex].toString() : "Open";
     }
     
-    if(!clientData.isPaid) {
-      return {success: false, message: "⚠️ Non puoi prenotare: abbonamento non pagato."};
-    }
+    let remaining = -1;
+    let limitReached = false;
     
-    if(clientData.certificateExpired) {
-      return {success: false, message: "Certificato medico scaduto"};
-    }
-    
-    const sm = new SpreadsheetManager();
-    
-    // ⚡ Ottieni dati cached
-    const slotsData = sm.getCachedData('SpaziOrari');
-    const prenData = sm.getCachedData('Prenotazioni');
-    
-    // Trova slot
-    const slot = slotsData.slice(1).find(r => r[0] == slotId);
-    if(!slot) {
-      return {success: false, message: "Slot non trovato"};
-    }
-    
-    // Validazioni veloci
-    const slotDate = getNextSlotDate(slot[1], slot[2]);
-    const slotDateString = formatDateForComparison(slotDate);
-    
-    // ⚡ Conta veloce prenotazioni esistenti
-    let count = 0;
-    const emailLower = email.toLowerCase();
-    let hasDuplicate = false;
-    
-    if(prenData && prenData.length > 1) {
-      for(let i = 1; i < prenData.length; i++) {
-        const booking = prenData[i];
-        if(booking[4] != slotId) continue;
-        
-        if(booking[8]) {
-          const bookingDate = parseDateItalian(booking[8]);
-          if(formatDateForComparison(bookingDate) === slotDateString) {
-            count++;
-            
-            // Check duplicato stesso utente
-            if(booking[1]?.toString().toLowerCase() === emailLower) {
-              hasDuplicate = true;
-              break;
-            }
-          }
-        }
+    if (frequenza !== "Open") {
+      const frequenzaNum = parseInt(frequenza);
+      if (!isNaN(frequenzaNum)) {
+        remaining = Math.max(0, frequenzaNum - weeklyBookings);
+        limitReached = weeklyBookings >= frequenzaNum;
       }
     }
     
-    if(hasDuplicate) {
-      return {success: false, message: '❌ Hai già prenotato questo slot!'};
-    }
-    
-    if(count >= 8) {
-      return {success: false, message: "❌ SLOT COMPLETO"};
-    }
-    
-    // Crea prenotazione
-    const prenSheet = sm.getSheet('Prenotazioni');
-    const newRow = [
-      Utilities.getUuid(),
-      clientData.email,
-      clientData.nome,
-      clientData.cognome,
-      slot[0],
-      slot[1],
-      slot[2],
-      slot[3],
-      slotDate
-    ];
-    
-    prenSheet.appendRow(newRow);
-    
-    // ⚡ Invalida cache
-    sm.invalidateCache('Prenotazioni');
-    
     return {
-      success: true, 
-      message: `Prenotazione completata: ${slot[1]} ${slot[2]}-${slot[3]}`
+      weekNumber: weekNumber,
+      year: year,
+      weeklyBookings: weeklyBookings,
+      frequenza: frequenza,
+      remainingBookings: remaining,
+      limitReached: limitReached,
+      message: frequenza === "Open" ? 
+        "Abbonamento Open - prenotazioni illimitate" : 
+        `Prenotazioni: ${weeklyBookings}/${frequenza} (${remaining} rimanenti)`
     };
     
   } catch(error) {
-    Logger.log('Errore in bookSlot: ' + error.toString());
-    return {success: false, message: "Errore durante la prenotazione"};
+    Logger.log('Errore in getWeeklyBookingInfo: ' + error.toString());
+    return {
+      weekNumber: 0,
+      weeklyBookings: 0,
+      frequenza: "Unknown",
+      remainingBookings: 0,
+      limitReached: true,
+      message: "Errore nel recupero informazioni"
+    };
   }
 }
 
@@ -548,33 +864,6 @@ function cancelBooking(bookingId, userEmail) {
   } catch(error) {
     Logger.log('Errore in cancelBooking: ' + error.toString());
     return {success: false, message: 'Errore durante la cancellazione'};
-  }
-}
-
-// ⚡ OTTIMIZZATO: Get Available Slots
-function getAvailableSlots() {
-  try {
-    const sm = new SpreadsheetManager();
-    
-    // ⚡ Usa dati cached
-    const slotsData = sm.getCachedData('SpaziOrari');
-    const prenData = sm.getCachedData('Prenotazioni');
-    
-    if(!slotsData || slotsData.length <= 1) return [];
-    
-    const slots = slotsData.slice(1).map(row => ({
-      ID_Spazio: row[0],
-      Giorno: row[1],
-      Ora_Inizio: row[2],
-      Ora_Fine: row[3],
-      Descrizione: row[1] + " " + row[2] + "-" + row[3]
-    }));
-
-    return filterAvailableSlotsWithCount(slots, prenData ? prenData.slice(1) : []);
-    
-  } catch(error) {
-    Logger.log('Errore in getAvailableSlots: ' + error.toString());
-    return [];
   }
 }
 
@@ -677,8 +966,7 @@ function getClientDataWithBookings(email, clientId = null) {
   }
 }
 
-// === RESTO DELLE FUNZIONI RIMANGONO UGUALI ===
-// (tutte le altre funzioni helper rimangono identiche)
+// === FUNZIONI HELPER ===
 
 function getTempCodesSheet() {
   const sm = new SpreadsheetManager();
@@ -805,6 +1093,58 @@ function checkCodeRequestLimit(email) {
   }
 }
 
+// ⚡ AGGIUNGI QUESTA FUNZIONE: Sistema di sicurezza con 15 minuti
+function checkSecurityLimit(email, actionType = 'REQUEST_CODE') {
+  try {
+    const logSheet = getDebugLogSheet();
+    const data = logSheet.getDataRange().getValues();
+    
+    const now = new Date();
+    const fifteenMinutesAgo = new Date(now.getTime() - 15 * 60 * 1000); // ⚡ 15 minuti
+    
+    let requestCount = 0;
+    let failedLoginCount = 0;
+    
+    for(let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const timestamp = row[0] ? new Date(row[0]) : null;
+      const rowEmail = row[1]?.toString().toLowerCase() || '';
+      const rowAction = row[2]?.toString() || '';
+      const rowResult = row[3]?.toString() || '';
+      
+      if(timestamp && timestamp > fifteenMinutesAgo && rowEmail === email.toLowerCase()) {
+        if (rowAction === 'RICHIESTA_CODICE') {
+          requestCount++;
+        } else if (rowAction === 'LOGIN' && rowResult === 'CODICE_ERRATO') {
+          failedLoginCount++;
+        }
+      }
+    }
+    
+    // ⚡ CONTROLLO RICHIESTE CODICE
+    if (actionType === 'REQUEST_CODE' && requestCount >= SECURITY_CONFIG.MAX_CODE_REQUESTS) {
+      return {
+        allowed: false,
+        message: "🔒 Hai richiesto troppi codici. Per sicurezza, riprova tra 15 minuti."
+      };
+    }
+    
+    // ⚡ CONTROLLO LOGIN FALLITI
+    if (actionType === 'LOGIN' && failedLoginCount >= 5) {
+      return {
+        allowed: false,
+        message: "🔒 Account temporaneamente bloccato. Hai superato il numero massimo di tentativi. Riprova tra 15 minuti."
+      };
+    }
+    
+    return {allowed: true};
+    
+  } catch(error) {
+    Logger.log('Errore in checkSecurityLimit: ' + error.toString());
+    return {allowed: true};
+  }
+}
+
 function sendClientCode(email) {
   try {
     if (!email || typeof email !== 'string') {
@@ -876,39 +1216,12 @@ Team LIFT Pisa`;
   }
 }
 
-// Funzioni helper (invariate)
 function getWeekNumber(d) {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const dayNum = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
-}
-
-function getNextSlotDate(dayName, slotTime) {
-  const days = { "Domenica": 0, "Lunedì": 1, "Martedì": 2, "Mercoledì": 3, "Giovedì": 4, "Venerdì": 5, "Sabato": 6 };
-  const today = new Date();
-  const todayDay = today.getDay();
-  const slotDay = days[dayName];
-  
-  let diff = slotDay - todayDay;
-  if (diff < 0) diff += 7;
-
-  const currentHour = today.getHours();
-  const slotHour = parseInt(slotTime.split(':')[0]);
-  
-  if (diff === 0 && currentHour >= (slotHour - 2)) {
-    diff += 7;
-  }
-
-  if (todayDay === 0) {
-    if (diff === 0) diff = 7;
-  }
-
-  const targetDate = new Date(today);
-  targetDate.setDate(today.getDate() + diff);
-  targetDate.setHours(0, 0, 0, 0);
-  return targetDate;
 }
 
 function formatDate(date) {
@@ -1067,87 +1380,6 @@ function getPaymentLink(email) {
   }
 }
 
-function doGet(e) {
-  Logger.log('doGet chiamato con parametri: ' + JSON.stringify(e.parameter));
-  return handleRequest(e);
-}
-
-function handleRequest(e) {
-  try {
-    let result = {};
-    
-    if (e && e.parameter && e.parameter.action) {
-      const action = e.parameter.action;
-      
-      switch(action) {
-        case "getAvailableSlots":
-          result = getAvailableSlots();
-          break;
-          
-        case "sendClientCode":
-          result = sendClientCode(e.parameter.email);
-          break;
-          
-        case "getClientDataWithBookings":
-          result = getClientDataWithBookings(
-            e.parameter.email,
-            e.parameter.clientId || e.parameter.code
-          );
-          break;
-          
-        case "bookSlot":
-          result = bookSlot(
-            e.parameter.email, 
-            e.parameter.slotId, 
-            e.parameter.clientId || e.parameter.code
-          );
-          break;
-          
-        case "cancelBooking":
-          result = cancelBooking(
-            e.parameter.bookingId, 
-            e.parameter.email
-          );
-          break;
-
-        case "getCommunications":
-          result = getActiveCommunications();
-          break;
-
-        case "getAppUpdateInfo":
-          result = getAppUpdateInfo();
-          break;
-
-        case "getPaymentLink":
-          result = getPaymentLink(e.parameter.email);
-          break;
-          
-        default:
-          result = {error: "Azione non valida: " + action};
-      }
-    } else {
-      result = {
-        status: 'ok', 
-        message: 'API Sistema Prenotazione attiva',
-        version: '2.4-PERFORMANCE',
-        timestamp: new Date().toISOString()
-      };
-    }
-    
-    // ⚡ Flush logs prima di ritornare
-    flushLogs();
-    
-    return createCorsResponse(result);
-    
-  } catch (error) {
-    Logger.log('ERRORE CRITICO in handleRequest: ' + error.toString());
-    return createCorsResponse({
-      error: "Errore interno del server",
-      details: error.toString()
-    });
-  }
-}
-
 function createCorsResponse(data) {
   const jsonString = JSON.stringify(data);
   const output = ContentService.createTextOutput(jsonString);
@@ -1155,7 +1387,12 @@ function createCorsResponse(data) {
   return output;
 }
 
-// Pulizie periodiche (invariate ma con cache invalidation)
+function doGet(e) {
+  Logger.log('doGet chiamato con parametri: ' + JSON.stringify(e.parameter));
+  return handleRequest(e);
+}
+
+// Pulizie periodiche
 function cleanupOldBookings() {
   try {
     const sm = new SpreadsheetManager();
@@ -1321,3 +1558,28 @@ function cleanupOldDebugLogs(daysToKeep = 30) {
     return {success: false, message: error.toString()};
   }
 }
+
+
+// Esegui questa funzione temporanea
+function resetUserCodes() {
+  const email = 'nurabdelhaq@gmail.com';
+  const tempSheet = getTempCodesSheet();
+  const data = tempSheet.getDataRange().getValues();
+  
+  let deleted = 0;
+  for(let i = data.length - 1; i >= 1; i--) {
+    const row = data[i];
+    if(row[0]?.toString().toLowerCase().trim() === email.toLowerCase().trim()) {
+      console.log('🗑️ Elimino riga', i + 1, 'Codice:', row[2]);
+      tempSheet.deleteRow(i + 1);
+      deleted++;
+    }
+  }
+  
+  console.log('✅ Eliminate', deleted, 'righe per', email);
+  return { success: true, deleted: deleted };
+}
+
+
+
+

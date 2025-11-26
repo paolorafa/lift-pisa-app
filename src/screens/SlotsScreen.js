@@ -52,31 +52,36 @@ export default function SlotsScreen({ navigation, route }) {
   };
 
   const filterSlotsByDay = () => {
-    if (!giorno) {
-      setFilteredSlots(slots);
-      return;
-    }
-    
-    const today = new Date();
-    const isToday = data === today.toISOString().split("T")[0];
+  if (!giorno) {
+    setFilteredSlots(slots);
+    return;
+  }
+  
+  const today = new Date();
+  const isToday = data === today.toISOString().split("T")[0];
 
-    const filtered = slots
-      .filter(slot => slot.Giorno === giorno)
-      .filter(slot => {
-        if (!isToday) return true; // Giorni futuri → nessun filtro
+  const filtered = slots
+    .filter(slot => slot.Giorno === giorno)
+    .filter(slot => {
+      if (!isToday) return true; // Giorni futuri → nessun filtro
 
-        // Giorno di oggi → applica filtro "2 ore prima"
-        const nowMinutes = today.getHours() * 60 + today.getMinutes();
-        const minAllowedMinutes = nowMinutes + 120; // +2 ore
+      // Giorno di oggi → controlla se lo slot è già PASSATO
+      const nowMinutes = today.getHours() * 60 + today.getMinutes();
+      const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
+      const slotMinutes = startHour * 60 + startMin;
 
-        const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
-        const slotMinutes = startHour * 60 + startMin;
+      // ⚡ MODIFICA: Controlla se lo slot è già PASSATO
+      if (slotMinutes < nowMinutes) {
+        return false; // ❌ Slot già passato, non mostrare
+      }
 
-        return slotMinutes >= minAllowedMinutes;
-      });
+      // ⚡ MODIFICA: Controllo "2 ore prima" solo per slot FUTURI
+      const minAllowedMinutes = nowMinutes + 120; // +2 ore
+      return slotMinutes >= minAllowedMinutes;
+    });
 
-    setFilteredSlots(filtered);
-  };
+  setFilteredSlots(filtered);
+};
 
   // ⚡ NUOVA FUNZIONE: Estrae la data dalla descrizione
   const extractDateFromDescription = (description) => {
