@@ -3,10 +3,11 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Platform, View, Text, StyleSheet, Animated } from 'react-native';
-import { useEffect, useState, useRef } from 'react'; // ✅ Aggiungi useRef
+import { useEffect, useState, useRef } from 'react';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
 import ApiService from '../services/api';
+import * as Updates from 'expo-updates'; // 🔥 Importa expo-updates
 
 // Screens
 import BookingsScreen from '../screens/BookingsScreen';
@@ -37,34 +38,29 @@ function BookingStackScreen() {
 }
 
 // 🔔 Componente Icona con Campanella Animata
-function AnimatedBellIcon({ color, size, hasPendingPayment }) {
+function AnimatedBellIcon({ color, size, hasNotification }) {
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (hasPendingPayment) {
-      // Animazione continua della campanella
+    if (hasNotification) {
       const startAnimation = () => {
         Animated.sequence([
-          // Rotazione sinistra
           Animated.timing(rotateAnim, {
             toValue: -0.3,
             duration: 200,
             useNativeDriver: true,
           }),
-          // Rotazione destra
           Animated.timing(rotateAnim, {
             toValue: 0.3,
             duration: 200,
             useNativeDriver: true,
           }),
-          // Ritorno al centro
           Animated.timing(rotateAnim, {
             toValue: 0,
             duration: 200,
             useNativeDriver: true,
           }),
-          // Piccolo scale per effetto "vibrazione"
           Animated.sequence([
             Animated.timing(scaleAnim, {
               toValue: 1.2,
@@ -78,40 +74,40 @@ function AnimatedBellIcon({ color, size, hasPendingPayment }) {
             }),
           ]),
         ]).start(() => {
-          // Ripeti dopo 3 secondi
           setTimeout(startAnimation, 3000);
         });
       };
 
       startAnimation();
     } else {
-      // Ferma le animazioni
       rotateAnim.setValue(0);
       scaleAnim.setValue(1);
     }
-  }, [hasPendingPayment]);
+  }, [hasNotification]);
 
   const rotateStyle = {
     transform: [
-      { rotate: rotateAnim.interpolate({
-        inputRange: [-1, 1],
-        outputRange: ['-30deg', '30deg']
-      })},
+      { 
+        rotate: rotateAnim.interpolate({
+          inputRange: [-1, 1],
+          outputRange: ['-30deg', '30deg']
+        })
+      },
       { scale: scaleAnim }
     ]
   };
 
   return (
     <View style={styles.iconContainer}>
-      <Animated.View style={hasPendingPayment ? rotateStyle : null}>
+      <Animated.View style={hasNotification ? rotateStyle : null}>
         <MaterialCommunityIcons 
-          name={hasPendingPayment ? "bell-ring" : "bell"} 
+          name={hasNotification ? "bell-ring" : "bell"} 
           size={size} 
           color={color} 
         />
       </Animated.View>
       
-      {hasPendingPayment && (
+      {hasNotification && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>!</Text>
         </View>
@@ -120,18 +116,146 @@ function AnimatedBellIcon({ color, size, hasPendingPayment }) {
   );
 }
 
+// 🔄 Componente Icona Aggiornamenti con Notifica
+function AnimatedUpdateIcon({ color, size, hasUpdate }) {
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (hasUpdate) {
+      // Animazione rotazione continua
+      Animated.loop(
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        })
+      ).start();
+
+      // Animazione pulsante per il badge
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.3,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      rotateAnim.setValue(0);
+      pulseAnim.setValue(1);
+    }
+  }, [hasUpdate]);
+
+  const rotateStyle = {
+    transform: [
+      { 
+        rotate: rotateAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: ['0deg', '360deg']
+        })
+      }
+    ]
+  };
+
+  const pulseStyle = {
+    transform: [{ scale: pulseAnim }]
+  };
+
+  return (
+    <View style={styles.iconContainer}>
+      <Animated.View style={hasUpdate ? rotateStyle : null}>
+        <MaterialCommunityIcons 
+          name={hasUpdate ? "update" : "information"} 
+          size={size} 
+          color={color} 
+        />
+      </Animated.View>
+      
+      {hasUpdate && (
+        <Animated.View style={[styles.updateBadge, pulseStyle]}>
+          <Text style={styles.badgeText}>!</Text>
+        </Animated.View>
+      )}
+    </View>
+  );
+}
+
+// 🔥 FUNZIONE: Confronta versioni (es: "1.0.2" vs "1.0.3")
+function compareVersions(currentVersion, latestVersion) {
+  if (!currentVersion || !latestVersion) return false;
+  
+  try {
+    const currentParts = currentVersion.split('.').map(Number);
+    const latestParts = latestVersion.split('.').map(Number);
+    
+    // Confronta major, minor, patch
+    for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+      const currentPart = currentParts[i] || 0;
+      const latestPart = latestParts[i] || 0;
+      
+      if (latestPart > currentPart) {
+        return true; // Nuova versione disponibile
+      } else if (latestPart < currentPart) {
+        return false; // Versione corrente è più nuova
+      }
+    }
+    
+    return false; // Versioni uguali
+  } catch (error) {
+    console.error('Errore nel confronto versioni:', error);
+    return false;
+  }
+}
+
 function MainTabs() {
   const insets = useSafeAreaInsets();
   const [hasPendingPayment, setHasPendingPayment] = useState(false);
+  const [hasNewUpdate, setHasNewUpdate] = useState(false);
+  const [currentAppVersion, setCurrentAppVersion] = useState(null);
   
   useEffect(() => {
+    // Ottieni la versione corrente dell'app
+    getCurrentAppVersion();
     checkForPayments();
+    checkForUpdates();
     
-    // Controlla i pagamenti ogni 2 minuti quando l'app è in foreground
-    const interval = setInterval(checkForPayments, 120000);
+    const interval = setInterval(() => {
+      checkForPayments();
+      checkForUpdates();
+    }, 120000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [currentAppVersion]); // 🔥 Riassegna quando currentAppVersion cambia
+
+  // 🔥 Ottieni la versione corrente dell'app
+  const getCurrentAppVersion = async () => {
+    try {
+      // Metodo 1: Usa expo-updates (consigliato)
+      if (Updates) {
+        const update = await Updates.checkForUpdateAsync();
+        const version = Updates.runtimeVersion || Updates.manifest?.version;
+        setCurrentAppVersion(version);
+        console.log('📱 Versione app corrente:', version);
+      } else {
+        // Metodo 2: Usa app.json (fallback)
+        const appConfig = require('../../app.json');
+        const version = appConfig.expo.version;
+        setCurrentAppVersion(version);
+        console.log('📱 Versione app corrente (fallback):', version);
+      }
+    } catch (error) {
+      console.error('Errore nel recupero versione app:', error);
+      // Metodo 3: Versione hardcodata (ultima risorsa)
+      setCurrentAppVersion('1.0.2'); // 🔥 SOSTITUISCI con la tua versione attuale
+    }
+  };
 
   const checkForPayments = async () => {
     try {
@@ -146,14 +270,38 @@ function MainTabs() {
       
       if (result.success && result.hasPayment) {
         setHasPendingPayment(true);
-        console.log('🔔 Campanella ATTIVATA - Pagamento pendente');
       } else {
         setHasPendingPayment(false);
-        console.log('🔔 Campanella DISATTIVATA - Nessun pagamento');
       }
     } catch (error) {
       console.error('Errore controllo pagamenti:', error);
       setHasPendingPayment(false);
+    }
+  };
+
+  const checkForUpdates = async () => {
+    try {
+      const result = await ApiService.getAppUpdateInfo();
+      console.log('🔄 Controllo aggiornamenti:', result);
+      
+      if (result.success && result.updateAvailable && result.latestVersion) {
+        // 🔥 CONFRONTA LE VERSIONI
+        const isNewVersionAvailable = compareVersions(currentAppVersion, result.latestVersion);
+        
+        if (isNewVersionAvailable) {
+          setHasNewUpdate(true);
+          console.log(`🆕 NUOVA VERSIONE DISPONIBILE: ${currentAppVersion} → ${result.latestVersion}`);
+        } else {
+          setHasNewUpdate(false);
+          console.log(`✅ APP AGGIORNATA: ${currentAppVersion} (ultima: ${result.latestVersion})`);
+        }
+      } else {
+        setHasNewUpdate(false);
+        console.log('📱 Nessun aggiornamento disponibile');
+      }
+    } catch (error) {
+      console.error('Errore controllo aggiornamenti:', error);
+      setHasNewUpdate(false);
     }
   };
   
@@ -198,17 +346,15 @@ function MainTabs() {
         }}
       />
       
-      {/* 🔥 TAB PAGAMENTI CON CAMPANELLA ANIMATA */}
+      {/* 🔔 TAB PAGAMENTI CON CAMPANELLA ANIMATA */}
       <Tab.Screen
         name="Payments"
         component={PaymentsScreen}
         listeners={{
           tabPress: () => {
-            // Ricarica i dati quando si clicca sul tab
             checkForPayments();
           },
           focus: () => {
-            // Ricarica anche quando si naviga verso questo tab
             checkForPayments();
           },
         }}
@@ -218,7 +364,7 @@ function MainTabs() {
             <AnimatedBellIcon 
               color={color} 
               size={size} 
-              hasPendingPayment={hasPendingPayment}
+              hasNotification={hasPendingPayment}
             />
           ),
         }}
@@ -235,13 +381,26 @@ function MainTabs() {
         }}
       />
       
+      {/* 🔄 TAB AGGIORNAMENTI - NOTIFICA SOLO SE VERSIONE DIVERSA */}
       <Tab.Screen
         name="Updates"
         component={UpdatesScreen}
+        listeners={{
+          tabPress: () => {
+            checkForUpdates();
+          },
+          focus: () => {
+            checkForUpdates();
+          },
+        }}
         options={{
-          tabBarLabel: 'Aggiornamenti',
+          tabBarLabel: hasNewUpdate ? 'News 🆕' : 'Aggiornamenti',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="update" size={size} color={color} />
+            <AnimatedUpdateIcon 
+              color={color} 
+              size={size} 
+              hasUpdate={hasNewUpdate}
+            />
           ),
         }}
       />
@@ -249,7 +408,7 @@ function MainTabs() {
   );
 }
 
-// Stili aggiornati
+// Stili (rimangono uguali)
 const styles = StyleSheet.create({
   iconContainer: {
     position: 'relative',
@@ -259,6 +418,20 @@ const styles = StyleSheet.create({
     top: -4,
     right: -6,
     backgroundColor: colors.error,
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.backgroundLight,
+    zIndex: 1,
+  },
+  updateBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -6,
+    backgroundColor: colors.warning,
     borderRadius: 8,
     width: 16,
     height: 16,

@@ -160,7 +160,7 @@ function getAvailableSlots(targetDate = null) {
   }
 }
 
-// ⚡ MODIFICA: Filtra slot con supporto per date specifiche e controllo orario corretto
+// ⚡ CORREZIONE: Filtra slot con controllo orario CORRETTO per slot 6-7
 function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
   const now = new Date();
   const currentHour = now.getHours();
@@ -197,30 +197,49 @@ function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
     const slotDateOnly = new Date(slotDate);
     slotDateOnly.setHours(0, 0, 0, 0);
     
-    // ⚡ MODIFICA: Controllo "oggi" - se è oggi, applica regola "fino alle 16 per slot delle 6"
     const isToday = slotDateOnly.getTime() === today.getTime();
-    if(isToday) {
-      // Se è slot delle 6-7, blocca dopo le 16 del giorno prima
-      if(slotHour === 6 && currentHour >= 16) {
-        return false;
+    const isTomorrow = slotDateOnly.getTime() === today.getTime() + 24 * 60 * 60 * 1000;
+    
+    // 🔥 CORREZIONE: Controllo per slot 6-7 del GIORNO DOPO
+    if (slotHour === 6) {
+      if (isTomorrow) {
+        // Per slot 6-7 di DOMANI, blocca dopo le 17 di OGGI
+        if (currentHour >= 17) {
+          Logger.log(`❌ Bloccato slot 6-7 di domani: sono le ${currentHour}:${currentMinutes}`);
+          return false;
+        }
+      } else if (isToday) {
+        // Per slot 6-7 di OGGI, applica regola standard 2 ore prima
+        const nowTotalMinutes = currentHour * 60 + currentMinutes;
+        const [startHour, startMin] = slot.Ora_Inizio.split(':').map(Number);
+        const slotTotalMinutes = startHour * 60 + (startMin || 0);
+        
+        if (slotTotalMinutes - nowTotalMinutes < 120) { // Meno di 2 ore
+          Logger.log(`❌ Bloccato slot 6-7 di oggi: meno di 2 ore (${slotTotalMinutes - nowTotalMinutes} minuti)`);
+          return false;
+        }
       }
-      
+    } else {
       // Per tutti gli altri slot, regola standard "2 ore prima"
-      const nowTotalMinutes = currentHour * 60 + currentMinutes;
-      const [startHour, startMin] = slot.Ora_Inizio.split(':').map(Number);
-      const slotTotalMinutes = startHour * 60 + (startMin || 0);
-      
-      if(slotTotalMinutes - nowTotalMinutes < 120) { // Meno di 2 ore
-        return false;
+      if (isToday) {
+        const nowTotalMinutes = currentHour * 60 + currentMinutes;
+        const [startHour, startMin] = slot.Ora_Inizio.split(':').map(Number);
+        const slotTotalMinutes = startHour * 60 + (startMin || 0);
+        
+        if (slotTotalMinutes - nowTotalMinutes < 120) { // Meno di 2 ore
+          Logger.log(`❌ Bloccato slot ${startHour}:${startMin} di oggi: meno di 2 ore`);
+          return false;
+        }
       }
     }
     
-    // ⚡ MODIFICA: Se siamo dopo le 21, blocca solo gli slot di domani mattina presto (solo per oggi)
+    // ⚡ MODIFICA: Se siamo dopo le 21, blocca solo gli slot di domani mattina presto
     if (!targetDate && currentHour >= 21) {
       const tomorrow = new Date(today);
       tomorrow.setDate(today.getDate() + 1);
       const isTomorrow = slotDateOnly.getTime() === tomorrow.getTime();
       if (isTomorrow && slotHour < 7) {
+        Logger.log(`❌ Bloccato slot ${slotHour} di domani: dopo le 21`);
         return false;
       }
     }
@@ -236,7 +255,7 @@ function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
   });
 }
 
-// ⚡ MODIFICA: Prenota slot con controllo limite SETTIMANALE
+// ⚡ MODIFICA: Prenota slot con controllo orario CORRETTO
 function bookSlot(email, slotId, clientId = null, targetDate = null) {
   try {
     const clientData = verificaCliente(email, clientId);
@@ -274,14 +293,46 @@ function bookSlot(email, slotId, clientId = null, targetDate = null) {
       slotDate = getNextSlotDate(slot[1], slot[2]);
     }
     
+    // 🔥 CONTROLLO ORARIO PER SLOT 6-7
+    const now = new Date();
+    const slotHour = parseInt(slot[2].split(':')[0]);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const slotDateOnly = new Date(slotDate);
+    slotDateOnly.setHours(0, 0, 0, 0);
+    
+    const isTomorrow = slotDateOnly.getTime() === today.getTime() + 24 * 60 * 60 * 1000;
+    
+    // Controllo per slot 6-7 di domani
+    if (slotHour === 6 && isTomorrow && now.getHours() >= 17) {
+      return {
+        success: false,
+        message: "❌ Impossibile prenotare: lo slot 6-7 di domani può essere prenotato solo fino alle 17:00 di oggi."
+      };
+    }
+    
+    // Controllo per slot di oggi (2 ore prima)
+    const isToday = slotDateOnly.getTime() === today.getTime();
+    if (isToday) {
+      const nowTotalMinutes = now.getHours() * 60 + now.getMinutes();
+      const [startHour, startMin] = slot[2].split(':').map(Number);
+      const slotTotalMinutes = startHour * 60 + (startMin || 0);
+      
+      if (slotTotalMinutes - nowTotalMinutes < 120) {
+        return {
+          success: false,
+          message: `❌ Impossibile prenotare: lo slot ${slot[2]}-${slot[3]} di oggi richiede almeno 2 ore di preavviso.`
+        };
+      }
+    }
+    
     // ⭐⭐ CONTROLLO LIMITE PER LA SETTIMANA DELLO SLOT ⭐⭐
-    const weeklyBookings = countWeeklyBookings(email, slotDate); // Passa la data dello slot!
+    const weeklyBookings = countWeeklyBookings(email, slotDate);
     
     // Controlla se ha superato il limite dell'abbonamento per QUELLA settimana
     if (clientData.frequenza && clientData.frequenza !== "Open") {
       const frequenzaNum = parseInt(clientData.frequenza);
       if (!isNaN(frequenzaNum) && weeklyBookings >= frequenzaNum) {
-        const slotWeek = getWeekNumber(slotDate);
         return {
           success: false, 
           message: `❌ LIMITE SETTIMANALE RAGGIUNTO! Hai già ${weeklyBookings} prenotazioni su ${frequenzaNum} disponibili per la settimana del ${formatDate(slotDate)}.`
@@ -291,7 +342,7 @@ function bookSlot(email, slotId, clientId = null, targetDate = null) {
     
     const slotDateString = formatDateForComparison(slotDate);
     
-    // ⚡ Controllo duplicati e disponibilità slot (resta uguale)
+    // ⚡ Controllo duplicati e disponibilità slot
     let count = 0;
     const emailLower = email.toLowerCase();
     let hasDuplicate = false;

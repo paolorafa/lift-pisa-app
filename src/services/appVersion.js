@@ -1,5 +1,5 @@
 // [file name]: appVersion.js
-export const APP_VERSION = '1.0.2'; // Aggiorna questa versione quando pubblichi un update
+export const APP_VERSION = '1.0.3'; // Aggiorna questa versione quando pubblichi un update
 
 // Funzione per confrontare le versioni
 export const isUpdateAvailable = (currentVersion, latestVersion) => {

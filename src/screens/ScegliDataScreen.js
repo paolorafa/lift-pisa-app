@@ -137,14 +137,6 @@ export default function ScegliDataScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Istruzioni */}
-          <View style={styles.instructionBox}>
-            <Ionicons name="information-circle" size={20} color={colors.primary} />
-            <Text style={styles.instructionText} numberOfLines={2}>
-              Seleziona la data in cui vuoi allenarti
-            </Text>
-          </View>
-
           {/* Calendario */}
           <View style={styles.calendarContainer}>
             <Calendar
