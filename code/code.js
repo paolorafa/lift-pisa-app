@@ -553,7 +553,7 @@ function findClientByEmail(email) {
   return null;
 }
 
-// ⚡ OTTIMIZZATO: Verifica codici temporanei più veloce
+// 🔧 MODIFICA 1: verifyTempCode - NON CONTROLLARE PIÙ "Utilizzato" AL LOGIN
 function verifyTempCode(email, inputCode) {
   try {
     const tempSheet = getTempCodesSheet();
@@ -571,13 +571,13 @@ function verifyTempCode(email, inputCode) {
       if(row[0]?.toString().toLowerCase().trim() === emailLower && 
          row[2]?.toString().trim() === codeLower) {
         
-        // Verifica validità
-        if(row[5]) return null; // Già usato
+        // ⚡ MODIFICA: NON controllare più se è già usato al login
+        // Permettere molteplici tentativi di accesso con lo stesso codice
         
         const expiry = row[4] ? new Date(row[4]) : null;
         if(!expiry || expiry <= now) return null; // Scaduto
         
-        return row[1]; // Ritorna codice originale
+        return row[1]; // Ritorna codice originale - SEMPRE, se non scaduto
       }
     }
     
@@ -634,22 +634,10 @@ function countWeeklyBookings(email, targetDate = null) {
   }
 }
 
-// ⚡ OTTIMIZZATO: Verifica cliente veloce
+// 🔧 MODIFICA 2: verificaCliente - NON marcare come usato al login
 function verificaCliente(email, clientId = null) {
   try {
     Logger.log('⚡ Verifica veloce per: ' + email);
-    
-    // ⚡ AGGIUNTA: Controllo sicurezza per login con messaggio specifico
-    if (clientId) {
-      const loginLimitCheck = checkSecurityLimit(email, 'LOGIN');
-      if (!loginLimitCheck.allowed) {
-        logDebug(email, 'LOGIN', 'BLOCCATO', 'Troppi tentativi falliti');
-        return { 
-          found: false, 
-          error: "🔒 Account temporaneamente bloccato. Hai superato il numero massimo di tentativi. Riprova tra 15 minuti." 
-        };
-      }
-    }
     
     const clientInfo = findClientByEmail(email);
     
@@ -666,7 +654,7 @@ function verificaCliente(email, clientId = null) {
       const idInput = clientId.toString().trim().toUpperCase();
       
       let codeValid = false;
-      let usedTempCode = null;
+      // ⚡ RIMOSSO: let usedTempCode = null;
       
       if(idFromSheet === idInput) {
         codeValid = true;
@@ -675,7 +663,7 @@ function verificaCliente(email, clientId = null) {
         const tempCodeOriginal = verifyTempCode(email, idInput);
         if(tempCodeOriginal && tempCodeOriginal === idFromSheet) {
           codeValid = true;
-          usedTempCode = idInput;
+          // ⚡ NON salvare usedTempCode - non verrà marcato qui
           logDebug(email, 'LOGIN', 'SUCCESSO_TEMP', 'TempCode: ' + idInput);
         }
       }
@@ -688,12 +676,13 @@ function verificaCliente(email, clientId = null) {
         };
       }
       
-      if(usedTempCode) {
-        markTempCodeAsUsed(email, usedTempCode);
-      }
+      // ⚡ RIMOSSO: Il marcamento come usato
+      // if(usedTempCode) {
+      //   markTempCodeAsUsed(email, usedTempCode);
+      // }
     }
     
-    // Costruisci dati cliente (resto uguale)
+    // Resto del codice rimane uguale...
     const paymentStatusRaw = clientRow[9]?.toString().trim() || '';
     const isPaid = paymentStatusRaw.toLowerCase() === 'pagato';
     
@@ -718,7 +707,7 @@ function verificaCliente(email, clientId = null) {
       abbonamentoExpiryString: '',
     };
     
-    // Validazioni (codice esistente mantenuto)
+    // Validazioni certificati (codice esistente mantenuto)
     if(clientData.certificateExpiryDate) {
       try {
         const expiryDate = new Date(clientData.certificateExpiryDate);
@@ -738,7 +727,7 @@ function verificaCliente(email, clientId = null) {
       }
     }
     
-    // ASI e Abbonamento check (uguale)
+    // ASI check
     if(clientRow[18]) {
       const asiExpiryDate = new Date(clientRow[18]);
       if(!isNaN(asiExpiryDate.getTime())) {
@@ -750,6 +739,7 @@ function verificaCliente(email, clientId = null) {
       }
     }
     
+    // Abbonamento check
     if(clientRow[11]) {
       const abbonamentoExpiryDate = new Date(clientRow[11]);
       if(!isNaN(abbonamentoExpiryDate.getTime())) {
@@ -761,7 +751,6 @@ function verificaCliente(email, clientId = null) {
       }
     }
     
-   // ⚡ Usa prima riga per trovare colonna frequenza
     const headers = CACHE.data.main ? CACHE.data.main[0] : [];
     const freqIndex = headers.findIndex(h => 
       h.toString().toLowerCase().includes('frequenza') && 
@@ -771,11 +760,9 @@ function verificaCliente(email, clientId = null) {
     clientData.frequenza = (freqIndex >= 0 && clientRow[freqIndex]) ? 
                           clientRow[freqIndex].toString() : "Open";
     
-    // ⭐⭐ MODIFICA: Calcola prenotazioni per la SETTIMANA CORRENTE ⭐⭐
     const currentWeekBookings = countWeeklyBookings(email, new Date());
     clientData.weeklyBookings = currentWeekBookings;
     
-    // ⭐⭐ MODIFICA: Calcola prenotazioni rimanenti per la settimana corrente ⭐⭐
     if (clientData.frequenza && clientData.frequenza !== "Open") {
       const frequenzaNum = parseInt(clientData.frequenza);
       if (!isNaN(frequenzaNum)) {
@@ -783,7 +770,7 @@ function verificaCliente(email, clientId = null) {
         clientData.limitReached = currentWeekBookings >= frequenzaNum;
       }
     } else {
-      clientData.remainingBookings = -1; // Illimitato
+      clientData.remainingBookings = -1;
       clientData.limitReached = false;
     }
     
@@ -792,6 +779,30 @@ function verificaCliente(email, clientId = null) {
   } catch(error) {
     Logger.log('❌ Errore in verificaCliente: ' + error.toString());
     return { found: false, error: "Errore interno del server" };
+  }
+}
+
+// 🔧 NUOVA FUNZIONE: Marca il codice come usato quando accede alla home
+function markCodeAsUsedOnHomeAccess(email, clientId) {
+  try {
+    // Se ha usato un codice temporaneo (diverso dall'ID originale)
+    if(clientId) {
+      const clientInfo = findClientByEmail(email);
+      if(clientInfo) {
+        const originalClientId = clientInfo.row[0]?.toString().trim() || '';
+        
+        if(clientId !== originalClientId) {
+          // È un codice temporaneo
+          markTempCodeAsUsed(email, clientId);
+          Logger.log('✅ Codice temporaneo marcato come usato al login riuscito');
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch(error) {
+    Logger.log('Errore in markCodeAsUsedOnHomeAccess: ' + error.toString());
+    return false;
   }
 }
 
@@ -1144,7 +1155,7 @@ function checkCodeRequestLimit(email) {
   }
 }
 
-// ⚡ AGGIUNGI QUESTA FUNZIONE: Sistema di sicurezza con 15 minuti
+// ⚡ MODIFICA: Sistema di sicurezza SENZA BLOCCARE I LOGIN
 function checkSecurityLimit(email, actionType = 'REQUEST_CODE') {
   try {
     const logSheet = getDebugLogSheet();
@@ -1172,7 +1183,7 @@ function checkSecurityLimit(email, actionType = 'REQUEST_CODE') {
       }
     }
     
-    // ⚡ CONTROLLO RICHIESTE CODICE
+    // ⚡ CONTROLLO RICHIESTE CODICE - MANTENUTO
     if (actionType === 'REQUEST_CODE' && requestCount >= SECURITY_CONFIG.MAX_CODE_REQUESTS) {
       return {
         allowed: false,
@@ -1180,14 +1191,15 @@ function checkSecurityLimit(email, actionType = 'REQUEST_CODE') {
       };
     }
     
-    // ⚡ CONTROLLO LOGIN FALLITI
-    if (actionType === 'LOGIN' && failedLoginCount >= 5) {
-      return {
-        allowed: false,
-        message: "🔒 Account temporaneamente bloccato. Hai superato il numero massimo di tentativi. Riprova tra 15 minuti."
-      };
-    }
+    // ⚡ MODIFICA: RIMOSSO IL BLOCCCO PER LOGIN FALLITI
+    // if (actionType === 'LOGIN' && failedLoginCount >= 5) {
+    //   return {
+    //     allowed: false,
+    //     message: "🔒 Account temporaneamente bloccato. Hai superato il numero massimo di tentativi. Riprova tra 15 minuti."
+    //   };
+    // }
     
+    // ⚡ SEMPRE PERMESSO PER I LOGIN
     return {allowed: true};
     
   } catch(error) {
@@ -1202,6 +1214,7 @@ function sendClientCode(email) {
       return {success: false, message: "Email non valida"};
     }
     
+    // ⚡ MANTIENI IL LIMITE PER LE RICHIESTE CODICE (per evitare spam)
     const limitCheck = checkCodeRequestLimit(email);
     if (!limitCheck.allowed) {
       return {success: false, message: limitCheck.message};
@@ -1609,28 +1622,3 @@ function cleanupOldDebugLogs(daysToKeep = 30) {
     return {success: false, message: error.toString()};
   }
 }
-
-
-// Esegui questa funzione temporanea
-function resetUserCodes() {
-  const email = 'nurabdelhaq@gmail.com';
-  const tempSheet = getTempCodesSheet();
-  const data = tempSheet.getDataRange().getValues();
-  
-  let deleted = 0;
-  for(let i = data.length - 1; i >= 1; i--) {
-    const row = data[i];
-    if(row[0]?.toString().toLowerCase().trim() === email.toLowerCase().trim()) {
-      console.log('🗑️ Elimino riga', i + 1, 'Codice:', row[2]);
-      tempSheet.deleteRow(i + 1);
-      deleted++;
-    }
-  }
-  
-  console.log('✅ Eliminate', deleted, 'righe per', email);
-  return { success: true, deleted: deleted };
-}
-
-
-
-
