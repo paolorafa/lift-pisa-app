@@ -160,11 +160,54 @@ function getAvailableSlots(targetDate = null) {
   }
 }
 
-// ⚡ CORREZIONE: Filtra slot con controllo orario CORRETTO per slot 6-7
+// ⚡ NUOVA FUNZIONE: Controlla se uno slot è chiuso per una data specifica
+function isSlotChiusoPerData(slotId, slotDate, sm) {
+  try {
+    const slotsData = sm.getCachedData('SpaziOrari');
+    if (!slotsData || slotsData.length <= 1) return false;
+    
+    const slotDateOnly = new Date(slotDate);
+    slotDateOnly.setHours(0, 0, 0, 0);
+    
+    // Cerca lo slot nel foglio SpaziOrari
+    for (let i = 1; i < slotsData.length; i++) {
+      const row = slotsData[i];
+      if (row[0] == slotId) {
+        // Controlla colonna Data_Chiusura (posizione 4 = colonna E)
+        const dataChiusura = row[4];
+        
+        if (dataChiusura) {
+          try {
+            const dataChiusuraObj = new Date(dataChiusura);
+            dataChiusuraObj.setHours(0, 0, 0, 0);
+            
+            if (dataChiusuraObj.getTime() === slotDateOnly.getTime()) {
+              Logger.log(`❌ Slot ${slotId} chiuso per data: ${slotDateOnly.toLocaleDateString('it-IT')}`);
+              return true;
+            }
+          } catch(e) {
+            Logger.log('Errore parsing data chiusura: ' + e.toString());
+          }
+        }
+        break;
+      }
+    }
+    
+    return false;
+  } catch(error) {
+    Logger.log('Errore in isSlotChiusoPerData: ' + error.toString());
+    return false;
+  }
+}
+
+// ⚡ CORREZIONE: Filtra slot con controllo orario CORRETTO per slot 6-7 E chiusure per data
 function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
   const now = new Date();
   const currentHour = now.getHours();
   const currentMinutes = now.getMinutes();
+  
+  // ⚡ Creiamo un'istanza di SpreadsheetManager
+  const sm = new SpreadsheetManager();
 
   // ⚡ Pre-calcola conteggi in un'unica passata
   const bookingCounts = {};
@@ -184,7 +227,7 @@ function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
     }
   }
   
-  // ⚡ Filtra con conteggi pre-calcolati
+  // ⚡ Filtra con conteggi pre-calcolati e controllo chiusure
   return slots.filter(slot => {
     const slotHour = parseInt(slot.Ora_Inizio.toString().split(':')[0]);
     
@@ -203,8 +246,8 @@ function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
     // 🔥 CORREZIONE: Controllo per slot 6-7 del GIORNO DOPO
     if (slotHour === 6) {
       if (isTomorrow) {
-        // Per slot 6-7 di DOMANI, blocca dopo le 17 di OGGI
-        if (currentHour >= 17) {
+        // Per slot 6-7 di DOMANI, blocca dopo le 20 di OGGI
+        if (currentHour >= 20) {
           Logger.log(`❌ Bloccato slot 6-7 di domani: sono le ${currentHour}:${currentMinutes}`);
           return false;
         }
@@ -237,11 +280,17 @@ function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
     if (!targetDate && currentHour >= 21) {
       const tomorrow = new Date(today);
       tomorrow.setDate(today.getDate() + 1);
-      const isTomorrow = slotDateOnly.getTime() === tomorrow.getTime();
-      if (isTomorrow && slotHour < 7) {
+      const isTomorrowSlot = slotDateOnly.getTime() === tomorrow.getTime();
+      if (isTomorrowSlot && slotHour < 7) {
         Logger.log(`❌ Bloccato slot ${slotHour} di domani: dopo le 21`);
         return false;
       }
+    }
+    
+    // ⚡ NUOVO: Controlla se lo slot è chiuso per questa data specifica
+    if (isSlotChiusoPerData(slot.ID_Spazio, slotDate, sm)) {
+      Logger.log(`❌ Slot ${slot.ID_Spazio} chiuso per data: ${slotDateOnly.toLocaleDateString('it-IT')}`);
+      return false; // Escludi lo slot se è chiuso per questa data
     }
     
     const slotDateString = formatDateForComparison(slotDate);
@@ -255,7 +304,8 @@ function filterAvailableSlotsWithCount(slots, prenData, targetDate = null) {
   });
 }
 
-// ⚡ MODIFICA: Prenota slot con controllo orario CORRETTO
+
+// ⚡ MODIFICA: Prenota slot con controllo orario CORRETTO e chiusure per data
 function bookSlot(email, slotId, clientId = null, targetDate = null) {
   try {
     const clientData = verificaCliente(email, clientId);
@@ -265,6 +315,11 @@ function bookSlot(email, slotId, clientId = null, targetDate = null) {
     
     if(!clientData.isPaid) {
       return {success: false, message: "⚠️ Non puoi prenotare: abbonamento non pagato."};
+    }
+    
+    // 🔥 CONTROLLO ABBONAMENTO SCADUTO
+    if(clientData.abbonamentoExpired) {
+      return {success: false, message: clientData.message || "⚠️ Non puoi prenotare: abbonamento scaduto."};
     }
     
     if(clientData.certificateExpired) {
@@ -293,6 +348,14 @@ function bookSlot(email, slotId, clientId = null, targetDate = null) {
       slotDate = getNextSlotDate(slot[1], slot[2]);
     }
     
+    // ⚡ NUOVO: Controlla se lo slot è chiuso per questa data specifica
+    if (isSlotChiusoPerData(slotId, slotDate, sm)) {
+      return {
+        success: false,
+        message: `❌ Impossibile prenotare: slot chiuso per ${formatBookingDate(slotDate)}`
+      };
+    }
+    
     // 🔥 CONTROLLO ORARIO PER SLOT 6-7
     const now = new Date();
     const slotHour = parseInt(slot[2].split(':')[0]);
@@ -304,10 +367,10 @@ function bookSlot(email, slotId, clientId = null, targetDate = null) {
     const isTomorrow = slotDateOnly.getTime() === today.getTime() + 24 * 60 * 60 * 1000;
     
     // Controllo per slot 6-7 di domani
-    if (slotHour === 6 && isTomorrow && now.getHours() >= 17) {
+    if (slotHour === 6 && isTomorrow && now.getHours() >= 20) {
       return {
         success: false,
-        message: "❌ Impossibile prenotare: lo slot 6-7 di domani può essere prenotato solo fino alle 17:00 di oggi."
+        message: "❌ Impossibile prenotare: lo slot 6-7 di domani può essere prenotato solo fino alle 20:00 di oggi."
       };
     }
     
@@ -634,7 +697,7 @@ function countWeeklyBookings(email, targetDate = null) {
   }
 }
 
-// 🔧 MODIFICA 2: verificaCliente - NON marcare come usato al login
+// 🔧 MODIFICA 2: verificaCliente - Blocca prenotazione se abbonamento scaduto
 function verificaCliente(email, clientId = null) {
   try {
     Logger.log('⚡ Verifica veloce per: ' + email);
@@ -654,7 +717,6 @@ function verificaCliente(email, clientId = null) {
       const idInput = clientId.toString().trim().toUpperCase();
       
       let codeValid = false;
-      // ⚡ RIMOSSO: let usedTempCode = null;
       
       if(idFromSheet === idInput) {
         codeValid = true;
@@ -663,7 +725,6 @@ function verificaCliente(email, clientId = null) {
         const tempCodeOriginal = verifyTempCode(email, idInput);
         if(tempCodeOriginal && tempCodeOriginal === idFromSheet) {
           codeValid = true;
-          // ⚡ NON salvare usedTempCode - non verrà marcato qui
           logDebug(email, 'LOGIN', 'SUCCESSO_TEMP', 'TempCode: ' + idInput);
         }
       }
@@ -675,14 +736,8 @@ function verificaCliente(email, clientId = null) {
           error: "❌ Codice non corretto. Controlla di averlo inserito correttamente." 
         };
       }
-      
-      // ⚡ RIMOSSO: Il marcamento come usato
-      // if(usedTempCode) {
-      //   markTempCodeAsUsed(email, usedTempCode);
-      // }
     }
     
-    // Resto del codice rimane uguale...
     const paymentStatusRaw = clientRow[9]?.toString().trim() || '';
     const isPaid = paymentStatusRaw.toLowerCase() === 'pagato';
     
@@ -705,6 +760,7 @@ function verificaCliente(email, clientId = null) {
       isPaid: isPaid,
       abbonamentoExpired: false,
       abbonamentoExpiryString: '',
+      frequenza: "Open"
     };
     
     // Validazioni certificati (codice esistente mantenuto)
@@ -739,7 +795,7 @@ function verificaCliente(email, clientId = null) {
       }
     }
     
-    // Abbonamento check
+    // ⭐⭐ IMPORTANTE: CONTROLLO ABBONAMENTO SCADUTO ⭐⭐
     if(clientRow[11]) {
       const abbonamentoExpiryDate = new Date(clientRow[11]);
       if(!isNaN(abbonamentoExpiryDate.getTime())) {
@@ -748,6 +804,12 @@ function verificaCliente(email, clientId = null) {
         abbonamentoExpiryDate.setHours(0, 0, 0, 0);
         clientData.abbonamentoExpiryString = formatDate(abbonamentoExpiryDate);
         clientData.abbonamentoExpired = abbonamentoExpiryDate < today;
+        
+        // 🔥 CONTROLLO CHIAVE: Se l'abbonamento è scaduto, blocca la prenotazione
+        if (clientData.abbonamentoExpired) {
+          Logger.log(`❌ Abbonamento scaduto per ${email}: scaduto il ${clientData.abbonamentoExpiryString}`);
+          clientData.message = "⚠️ Impossibile prenotare: abbonamento scaduto il " + clientData.abbonamentoExpiryString;
+        }
       }
     }
     
@@ -929,7 +991,6 @@ function cancelBooking(bookingId, userEmail) {
   }
 }
 
-// ⚡ OTTIMIZZATO: Get user bookings veloce
 function getUserBookings(email) {
   try {
     const sm = new SpreadsheetManager();
@@ -939,13 +1000,12 @@ function getUserBookings(email) {
       return {success: true, bookings: [], totalBookings: 0};
     }
     
+    const now = new Date();
     const today = new Date();
-    const currentWeek = getWeekNumber(today);
-    const currentYear = today.getFullYear();
+    today.setHours(0, 0, 0, 0); // Inizio giornata
     const emailLower = email.toLowerCase();
     const userBookings = [];
     
-    // ⚡ Parti dal fondo per trovare prenotazioni più recenti
     for(let i = prenData.length - 1; i >= 1; i--) {
       const booking = prenData[i];
       
@@ -955,12 +1015,19 @@ function getUserBookings(email) {
       const bookingDate = new Date(booking[8]);
       if(isNaN(bookingDate.getTime())) continue;
       
-      const bookingWeek = getWeekNumber(bookingDate);
-      const bookingYear = bookingDate.getFullYear();
+      // Data solo giorno (senza orario)
+      const slotDateOnly = new Date(bookingDate);
+      slotDateOnly.setHours(0, 0, 0, 0);
       
-      // Solo prenotazioni future o settimana corrente
-      if(bookingYear > currentYear || 
-         (bookingYear === currentYear && bookingWeek >= currentWeek)) {
+      // 🔥 SEMPLICE: Mostra se è oggi o futuro
+      if (slotDateOnly >= today) {
+        const timeStr = booking[6]?.toString() || '00:00';
+        const [hour, minute = 0] = timeStr.split(':').map(Number);
+        const slotDateTime = new Date(bookingDate);
+        slotDateTime.setHours(hour, minute, 0, 0);
+        
+        const hasStarted = slotDateTime <= now;
+        const isToday = slotDateOnly.getTime() === today.getTime();
         
         userBookings.push({
           id: booking[0],
@@ -971,9 +1038,12 @@ function getUserBookings(email) {
           giorno: booking[5],
           oraInizio: booking[6],
           oraFine: booking[7],
-          dataPrenotazione: bookingDate.toISOString(),
+          dataPrenotazione: slotDateTime.toISOString(),
           dataFormatted: formatBookingDate(bookingDate),
-          slotDescription: `${booking[5]} ${booking[6]}-${booking[7]} (${formatBookingDate(bookingDate)})`
+          slotDescription: `${booking[5]} ${booking[6]}-${booking[7]} (${formatBookingDate(bookingDate)})`,
+          isToday: isToday,
+          hasStarted: hasStarted && isToday, // Solo se è oggi
+          canCancel: !(hasStarted && isToday) // Non può cancellare slot di oggi già iniziati
         });
       }
     }
@@ -1002,6 +1072,18 @@ function getClientDataWithBookings(email, clientId = null) {
       return JSON.parse(JSON.stringify(clientData));
     }
     
+    // 🔧 AGGIUNGI QUESTA PARTE: Marca il codice temporaneo come usato
+    if (clientId) {
+      const clientInfo = findClientByEmail(email);
+      if (clientInfo) {
+        const originalClientId = clientInfo.row[0]?.toString().trim() || '';
+        // Se ha usato un codice temporaneo (diverso dall'ID originale)
+        if (clientId !== originalClientId) {
+          markTempCodeAsUsedOnHomeAccess(email, clientId);
+        }
+      }
+    }
+    
     if(clientData.isBlocked || clientData.certificateExpired || !clientData.isPaid) {
       return JSON.parse(JSON.stringify({
         ...clientData,
@@ -1025,6 +1107,38 @@ function getClientDataWithBookings(email, clientId = null) {
       found: false, 
       error: "Errore nel recupero dati"
     }));
+  }
+}
+
+// 🔧 NUOVA FUNZIONE: Marca il codice come usato quando accede alla home
+function markTempCodeAsUsedOnHomeAccess(email, clientId) {
+  try {
+    const tempSheet = getTempCodesSheet();
+    const data = tempSheet.getDataRange().getValues();
+    
+    if(data.length <= 1) return false;
+    
+    const emailLower = email.toLowerCase().trim();
+    const codeUpper = clientId.toUpperCase().trim();
+    
+    // Cerca il codice temporaneo
+    for(let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowEmail = row[0]?.toString().toLowerCase().trim() || '';
+      const rowTempCode = row[2]?.toString().trim() || '';
+      
+      if(rowEmail === emailLower && rowTempCode === codeUpper) {
+        // Marca come utilizzato
+        tempSheet.getRange(i + 1, 6).setValue(true);
+        Logger.log('✅ Codice temporaneo marcato come usato: ' + codeUpper);
+        return true;
+      }
+    }
+    
+    return false;
+  } catch(error) {
+    Logger.log('Errore in markTempCodeAsUsedOnHomeAccess: ' + error.toString());
+    return false;
   }
 }
 
