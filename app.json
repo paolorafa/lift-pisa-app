@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "LiftPisaApp-v1.0.3",
+    "name": "LiftPisaApp-v1.0.4",
     "slug": "LiftPisaApp",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
-    "icon": "./assets/lift-logo.png",
+    "icon": "./assets/icona.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "1.0.2" ,
+      "buildNumber": "1.0.4" ,
       "bundleIdentifier": "com.liftpisa.LiftPisaApp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -22,14 +22,14 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/lift-logo.png",
+        "foregroundImage": "./assets/icona.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.liftpisa.LiftPisaApp"
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./assets/icona.png",
       "publicPath": "/prenotazioni/"
     },
     "extra": {

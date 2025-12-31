@@ -1,18 +1,47 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 
-// ⚠️ IMPORTANTE: Questo è il TUO URL dello script Google Apps
+// ⚠️ IMPORTANTE: Sostituisci con il TUO URL dello script Google Apps
 const API_URL = 'https://script.google.com/macros/s/AKfycbxcVaz2ior8uGiabNWVekpZ7905jCKlgff11XuXQGSa535Qeh2useIycWPGfgNOleP7/exec';
 
-const MAX_RETRIES = 2;
-const RETRY_DELAY = 500;
-const TIMEOUT_MS = 8000;
+// IMPOSTAZIONI MIGLIORATE
+const MAX_RETRIES = 3;           // Aumentato da 2
+const RETRY_DELAY = 1000;        // Aumentato da 500ms
+const TIMEOUT_MS = 15000;        // Aumentato da 8000ms (8s → 15s)
+const CACHE_DURATION = 300000;   // 5 minuti (corretto da 2 minuti)
 
 class ApiService {
+  constructor() {
+    this.userDataCache = null;
+    this.cacheTimestamp = null;
+    this.CACHE_DURATION = CACHE_DURATION;
+  }
+
   /**
-   * Fetch con retry automatico e timeout
+   * Controlla se il dispositivo è connesso a internet
+   */
+  async checkNetworkConnection() {
+    try {
+      const state = await NetInfo.fetch();
+      return state.isConnected && state.isInternetReachable;
+    } catch (error) {
+      console.warn('Network check error:', error);
+      // Se il check fallisce, assumi che c'è connessione (meglio provare che dare subito errore)
+      return true;
+    }
+  }
+
+  /**
+   * Fetch con retry automatico, timeout e gestione rete
    */
   async fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
     try {
+      // ✅ Controlla connessione prima di provare
+      const isConnected = await this.checkNetworkConnection();
+      if (!isConnected) {
+        throw new Error('NO_NETWORK');
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
       
@@ -24,18 +53,31 @@ class ApiService {
       clearTimeout(timeoutId);
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(`HTTP_${response.status}`);
       }
       
       const data = await response.json();
       return data;
       
     } catch (error) {
-      if (retries > 0 && error.name !== 'AbortError') {
-        console.log(`Retry ${MAX_RETRIES - retries + 1}/${MAX_RETRIES}`);
+      clearTimeout(timeoutId);
+      
+      // Distingui tipi di errore
+      const isNetworkError = error.name === 'AbortError' || error.message === 'NO_NETWORK';
+      const isServerError = error.message.startsWith('HTTP_');
+      
+      // ✅ Retry anche su AbortError (timeout), ma NON su errori di rete
+      if (retries > 0 && (isServerError || error.message === 'Failed to fetch')) {
+        console.log(`🔄 Retry ${MAX_RETRIES - retries + 1}/${MAX_RETRIES} - Errore: ${error.message}`);
         await this.delay(RETRY_DELAY);
         return this.fetchWithRetry(url, options, retries - 1);
       }
+      
+      // ✅ Lancia errore specifico per rete
+      if (isNetworkError) {
+        throw new Error('NETWORK_ERROR');
+      }
+      
       throw error;
     }
   }
@@ -54,6 +96,14 @@ class ApiService {
       return data;
     } catch (error) {
       console.error('Error requesting code:', error);
+      
+      // Messaggi di errore specifici
+      if (error.message === 'NETWORK_ERROR') {
+        throw new Error('Nessuna connessione internet. Controlla WiFi o dati mobili.');
+      }
+      if (error.message.startsWith('HTTP_')) {
+        throw new Error('Il server non risponde. Riprova tra pochi secondi.');
+      }
       throw new Error('Impossibile inviare il codice. Controlla la connessione.');
     }
   }
@@ -67,97 +117,94 @@ class ApiService {
       const data = await this.fetchWithRetry(url, { method: 'GET' });
       
       if (data.found) {
-        // ⭐ IMPORTANTE: Salva il codice ORIGINALE, non quello temporaneo
-        const originalCode = data.clientId; // Il server restituisce il codice originale
+        const originalCode = data.clientId;
         
         await AsyncStorage.setItem('user_email', email);
-        await AsyncStorage.setItem('user_code', originalCode); // ✅ Salva codice originale
+        await AsyncStorage.setItem('user_code', originalCode);
         await AsyncStorage.setItem('user_data', JSON.stringify(data));
         
-        console.log('✅ Login salvato con codice originale:', originalCode);
+        console.log('✅ Login salvato con codice:', originalCode);
       }
       
       return data;
       
     } catch (error) {
       console.error('Error during login:', error);
+      
+      if (error.message === 'NETWORK_ERROR') {
+        throw new Error('Nessuna connessione internet.');
+      }
+      if (error.message.startsWith('HTTP_')) {
+        throw new Error('Server non disponibile. Riprova tra poco.');
+      }
       throw new Error('Errore di connessione. Riprova.');
     }
   }
 
   /**
-   * ⚡ MODIFICA: Ottieni slot disponibili con supporto per data specifica
+   * Ottieni slot disponibili con cache migliorata
    */
-  async getAvailableSlots(targetDate = null) {
+  async getAvailableSlots() {
     try {
-      // Crea chiave cache basata sulla data
-      const cacheKey = targetDate ? `cached_slots_${targetDate}` : 'cached_slots';
-      const cacheTimeKey = targetDate ? `cache_time_${targetDate}` : 'cache_time';
-      
-      // Controlla cache (valida per 2 minuti)
-      const cached = await AsyncStorage.getItem(cacheKey);
-      const cacheTime = await AsyncStorage.getItem(cacheTimeKey);
+      // ✅ Cache valida per 5 minuti (non 2)
+      const cached = await AsyncStorage.getItem('cached_slots');
+      const cacheTime = await AsyncStorage.getItem('cache_time');
       
       if (cached && cacheTime) {
         const age = Date.now() - parseInt(cacheTime);
-        if (age < 300000) { // 2 minuti
-          console.log('Using cached slots for date:', targetDate);
+        if (age < CACHE_DURATION) {
+          console.log('⚡ Using cached slots (age:', Math.round(age / 1000), 's)');
           return JSON.parse(cached);
         }
       }
       
-      // ⚡ MODIFICA: Aggiungi targetDate alla richiesta se presente
-      let url = `${API_URL}?action=getAvailableSlots`;
-      if (targetDate) {
-        url += `&targetDate=${targetDate}`;
-      }
-      
+      const url = `${API_URL}?action=getAvailableSlots`;
       const data = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // Salva in cache con chiave specifica per la data
-      await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
-      await AsyncStorage.setItem(cacheTimeKey, Date.now().toString());
+      // Salva in cache
+      await AsyncStorage.setItem('cached_slots', JSON.stringify(data));
+      await AsyncStorage.setItem('cache_time', Date.now().toString());
       
       return data;
       
     } catch (error) {
       console.error('Error fetching slots:', error);
       
-      // Fallback su cache vecchia se disponibile
-      const cacheKey = targetDate ? `cached_slots_${targetDate}` : 'cached_slots';
-      const cached = await AsyncStorage.getItem(cacheKey);
+      // ✅ Fallback su cache anche se vecchia
+      const cached = await AsyncStorage.getItem('cached_slots');
       if (cached) {
-        console.log('Using old cached slots as fallback for date:', targetDate);
+        console.log('⚠️ Using old cached slots as fallback');
         return JSON.parse(cached);
       }
       
-      throw new Error('Impossibile caricare gli slot. Controlla la connessione.');
+      if (error.message === 'NETWORK_ERROR') {
+        throw new Error('Nessuna connessione. Controlla internet.');
+      }
+      throw new Error('Impossibile caricare gli slot. Riprova.');
     }
   }
 
   /**
-   * ⚡ MODIFICA: Prenota uno slot con supporto per data specifica
+   * Prenota uno slot
    */
-  async bookSlot(email, code, slotId, targetDate = null) {
+  async bookSlot(email, code, slotId) {
     try {
-      console.log('📝 Prenotazione con codice:', code, 'Data:', targetDate);
+      console.log('📝 Prenotazione con codice:', code);
       
-      // ⚡ MODIFICA: Aggiungi targetDate alla richiesta se presente
-      let url = `${API_URL}?action=bookSlot&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}&slotId=${slotId}`;
-      if (targetDate) {
-        url += `&targetDate=${targetDate}`;
-      }
-      
+      const url = `${API_URL}?action=bookSlot&email=${encodeURIComponent(email)}&clientId=${encodeURIComponent(code)}&slotId=${slotId}`;
       const result = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // ⚡ MODIFICA: Invalida tutte le cache degli slot
-      const keys = await AsyncStorage.getAllKeys();
-      const slotCacheKeys = keys.filter(key => key.startsWith('cached_slots') || key.startsWith('cache_time'));
-      await AsyncStorage.multiRemove(slotCacheKeys);
+      // Invalida cache dopo prenotazione
+      await AsyncStorage.removeItem('cached_slots');
+      await AsyncStorage.removeItem('cache_time');
       
       return result;
     } catch (error) {
       console.error('Error booking slot:', error);
+      
+      if (error.message === 'NETWORK_ERROR') {
+        throw new Error('Connessione persa. Controlla internet.');
+      }
       throw new Error('Errore durante la prenotazione. Riprova.');
     }
   }
@@ -170,28 +217,31 @@ class ApiService {
       const url = `${API_URL}?action=cancelBooking&email=${encodeURIComponent(email)}&bookingId=${bookingId}`;
       const result = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // ⚡ MODIFICA: Invalida tutte le cache degli slot
-      const keys = await AsyncStorage.getAllKeys();
-      const slotCacheKeys = keys.filter(key => key.startsWith('cached_slots') || key.startsWith('cache_time'));
-      await AsyncStorage.multiRemove(slotCacheKeys);
+      // Invalida cache
+      await AsyncStorage.removeItem('cached_slots');
+      await AsyncStorage.removeItem('cache_time');
       
       return result;
     } catch (error) {
       console.error('Error canceling booking:', error);
+      
+      if (error.message === 'NETWORK_ERROR') {
+        throw new Error('Nessuna connessione.');
+      }
       throw new Error('Errore durante la cancellazione. Riprova.');
     }
   }
 
   /**
-   * Ottieni dati utente aggiornati
+   * Ottieni dati utente aggiornati con cache
    */
   async refreshUserData(email, code, forceRefresh = false) {
     try {
-      // ⚡ Salta cache se forceRefresh è true
+      // ✅ Salta cache se forceRefresh è true
       if (!forceRefresh && this.userDataCache && this.cacheTimestamp) {
         const age = Date.now() - this.cacheTimestamp;
         if (age < this.CACHE_DURATION) {
-          console.log('⚡ Using cached user data');
+          console.log('⚡ Using cached user data (age:', Math.round(age / 1000), 's)');
           return this.userDataCache;
         }
       }
@@ -207,10 +257,17 @@ class ApiService {
       
       return data;
     } catch (error) {
+      console.error('Error refreshing user data:', error);
+      
       // Fallback su dati salvati
       const saved = await AsyncStorage.getItem('user_data');
       if (saved) {
+        console.log('⚠️ Using saved user data as fallback');
         return JSON.parse(saved);
+      }
+      
+      if (error.message === 'NETWORK_ERROR') {
+        throw new Error('Nessuna connessione.');
       }
       throw error;
     }
@@ -224,15 +281,18 @@ class ApiService {
       const url = `${API_URL}?action=getCommunications`;
       const data = await this.fetchWithRetry(url, { method: 'GET' });
       
-      // Se è un array, restituiscilo, altrimenti array vuoto
       return Array.isArray(data) ? data : [];
       
     } catch (error) {
       console.error('Error fetching communications:', error);
-      return []; // In caso di errore, restituisci array vuoto (non bloccare l'app)
+      // Non bloccare l'app se le comunicazioni non caricano
+      return [];
     }
   }
 
+  /**
+   * Ottieni informazioni aggiornamento app
+   */
   async getAppUpdateInfo() {
     try {
       const url = `${API_URL}?action=getAppUpdateInfo`;
@@ -244,6 +304,9 @@ class ApiService {
     }
   }
 
+  /**
+   * Ottieni informazioni pagamento
+   */
   async getPaymentInfo(email) {
     try {
       const url = `${API_URL}?action=getPaymentLink&email=${encodeURIComponent(email)}`;
@@ -260,16 +323,15 @@ class ApiService {
    */
   async logout() {
     try {
-      // ⚡ MODIFICA: Rimuove tutte le cache degli slot
-      const keys = await AsyncStorage.getAllKeys();
-      const allKeys = [
+      await AsyncStorage.multiRemove([
         'user_email',
-        'user_code', 
+        'user_code',
         'user_data',
-        ...keys.filter(key => key.startsWith('cached_slots') || key.startsWith('cache_time'))
-      ];
-      
-      await AsyncStorage.multiRemove(allKeys);
+        'cached_slots',
+        'cache_time'
+      ]);
+      this.userDataCache = null;
+      this.cacheTimestamp = null;
     } catch (error) {
       console.error('Error during logout:', error);
     }
@@ -296,18 +358,15 @@ class ApiService {
       const email = await AsyncStorage.getItem('user_email');
       const code = await AsyncStorage.getItem('user_code');
       
-      console.log('📋 Credenziali salvate - Email:', email, 'Code:', code);
+      console.log('📋 Credenziali salvate - Email:', email);
       
       return { email, code };
     } catch (error) {
       return { email: null, code: null };
     }
   }
-
-  // ⚡ AGGIUNGI: Costanti per cache
-  CACHE_DURATION = 300000; // 5 minuti
-  userDataCache = null;
-  cacheTimestamp = null;
 }
 
 export default new ApiService();
+
+

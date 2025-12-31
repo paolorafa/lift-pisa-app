@@ -15,7 +15,6 @@ import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import SlotsScreen from '../screens/SlotsScreen';
 import ScegliDataScreen from '../screens/ScegliDataScreen';
-import UpdatesScreen from '../screens/UpdatesScreen';
 import PaymentsScreen from '../screens/PaymentsScreen';
 
 const Stack = createNativeStackNavigator();
@@ -218,44 +217,6 @@ function MainTabs() {
   const insets = useSafeAreaInsets();
   const [hasPendingPayment, setHasPendingPayment] = useState(false);
   const [hasNewUpdate, setHasNewUpdate] = useState(false);
-  const [currentAppVersion, setCurrentAppVersion] = useState(null);
-  
-  useEffect(() => {
-    // Ottieni la versione corrente dell'app
-    getCurrentAppVersion();
-    checkForPayments();
-    checkForUpdates();
-    
-    const interval = setInterval(() => {
-      checkForPayments();
-      checkForUpdates();
-    }, 120000);
-    
-    return () => clearInterval(interval);
-  }, [currentAppVersion]); // 🔥 Riassegna quando currentAppVersion cambia
-
-  // 🔥 Ottieni la versione corrente dell'app
-  const getCurrentAppVersion = async () => {
-    try {
-      // Metodo 1: Usa expo-updates (consigliato)
-      if (Updates) {
-        const update = await Updates.checkForUpdateAsync();
-        const version = Updates.runtimeVersion || Updates.manifest?.version;
-        setCurrentAppVersion(version);
-        console.log('📱 Versione app corrente:', version);
-      } else {
-        // Metodo 2: Usa app.json (fallback)
-        const appConfig = require('../../app.json');
-        const version = appConfig.expo.version;
-        setCurrentAppVersion(version);
-        console.log('📱 Versione app corrente (fallback):', version);
-      }
-    } catch (error) {
-      console.error('Errore nel recupero versione app:', error);
-      // Metodo 3: Versione hardcodata (ultima risorsa)
-      setCurrentAppVersion('1.0.2'); // 🔥 SOSTITUISCI con la tua versione attuale
-    }
-  };
 
   const checkForPayments = async () => {
     try {
@@ -276,32 +237,6 @@ function MainTabs() {
     } catch (error) {
       console.error('Errore controllo pagamenti:', error);
       setHasPendingPayment(false);
-    }
-  };
-
-  const checkForUpdates = async () => {
-    try {
-      const result = await ApiService.getAppUpdateInfo();
-      console.log('🔄 Controllo aggiornamenti:', result);
-      
-      if (result.success && result.updateAvailable && result.latestVersion) {
-        // 🔥 CONFRONTA LE VERSIONI
-        const isNewVersionAvailable = compareVersions(currentAppVersion, result.latestVersion);
-        
-        if (isNewVersionAvailable) {
-          setHasNewUpdate(true);
-          console.log(`🆕 NUOVA VERSIONE DISPONIBILE: ${currentAppVersion} → ${result.latestVersion}`);
-        } else {
-          setHasNewUpdate(false);
-          console.log(`✅ APP AGGIORNATA: ${currentAppVersion} (ultima: ${result.latestVersion})`);
-        }
-      } else {
-        setHasNewUpdate(false);
-        console.log('📱 Nessun aggiornamento disponibile');
-      }
-    } catch (error) {
-      console.error('Errore controllo aggiornamenti:', error);
-      setHasNewUpdate(false);
     }
   };
   
@@ -377,30 +312,6 @@ function MainTabs() {
           tabBarLabel: 'Prenotazioni',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="bookmark" size={size} color={color} />
-          ),
-        }}
-      />
-      
-      {/* 🔄 TAB AGGIORNAMENTI - NOTIFICA SOLO SE VERSIONE DIVERSA */}
-      <Tab.Screen
-        name="Updates"
-        component={UpdatesScreen}
-        listeners={{
-          tabPress: () => {
-            checkForUpdates();
-          },
-          focus: () => {
-            checkForUpdates();
-          },
-        }}
-        options={{
-          tabBarLabel: hasNewUpdate ? 'News 🆕' : 'Aggiornamenti',
-          tabBarIcon: ({ color, size }) => (
-            <AnimatedUpdateIcon 
-              color={color} 
-              size={size} 
-              hasUpdate={hasNewUpdate}
-            />
           ),
         }}
       />
