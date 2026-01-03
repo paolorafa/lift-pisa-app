@@ -2,11 +2,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Platform, View, Text, StyleSheet, Animated } from 'react-native';
-import { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
-import ApiService from '../services/api';
+import { AppProvider, useApp } from '../context/AppContext';
 
 // Screens
 import BookingsScreen from '../screens/BookingsScreen';
@@ -116,63 +116,18 @@ function AnimatedBellIcon({ color, size, hasNotification }) {
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const { paymentData, loadPayments } = useApp();
   const [hasPendingPayment, setHasPendingPayment] = useState(false);
-  const [lastPreloadTime, setLastPreloadTime] = useState(null);
 
-  // ⚡ PRECACHING - Carica dati in background
-  const preloadData = async () => {
-    try {
-      console.log('⚡ Preload: Caricamento dati in background...');
-      
-      const { email } = await ApiService.getSavedCredentials();
-      
-      // Carica tutti i dati in parallelo
-      await Promise.all([
-        ApiService.getAvailableSlots(),      // Cache slot
-        ApiService.getCommunications(),       // Cache comunicazioni
-        email ? ApiService.getPaymentInfo(email) : null, // Cache pagamenti
-      ]);
-      
-      console.log('✅ Preload: Completato');
-    } catch (error) {
-      console.log('⚠️ Preload fallito (non critico):', error.message);
-      // Non bloccare l'app se il preload fallisce
-    }
-  };
-
-  // ⚡ SMART PRECACHING - Esegui preload periodicamente
+  // Controlla pagamenti quando il componente monta
   useEffect(() => {
-    // Preload immediato al mount
-    preloadData();
-    setLastPreloadTime(Date.now());
+    checkForPayments();
+  }, [paymentData]);
 
-    // Preload ogni 10 minuti
-    const preloadInterval = setInterval(() => {
-      preloadData();
-      setLastPreloadTime(Date.now());
-    }, 10 * 60 * 1000);
-
-    return () => clearInterval(preloadInterval);
-  }, []);
-
-  const checkForPayments = async () => {
-    try {
-      const { email } = await ApiService.getSavedCredentials();
-      if (!email) {
-        setHasPendingPayment(false);
-        return;
-      }
-
-      const result = await ApiService.getPaymentInfo(email);
-      console.log('💰 Controllo pagamenti:', result);
-      
-      if (result.success && result.hasPayment) {
-        setHasPendingPayment(true);
-      } else {
-        setHasPendingPayment(false);
-      }
-    } catch (error) {
-      console.error('Errore controllo pagamenti:', error);
+  const checkForPayments = () => {
+    if (paymentData?.success && paymentData?.hasPayment) {
+      setHasPendingPayment(true);
+    } else {
       setHasPendingPayment(false);
     }
   };
@@ -224,10 +179,7 @@ function MainTabs() {
         component={PaymentsScreen}
         listeners={{
           tabPress: () => {
-            checkForPayments();
-          },
-          focus: () => {
-            checkForPayments();
+            loadPayments(); // Ricarica quando si clicca
           },
         }}
         options={{
@@ -282,20 +234,23 @@ const styles = StyleSheet.create({
   },
 });
 
+// ⚡ APP NAVIGATOR CON CONTEXT PROVIDER
 export default function AppNavigator() {
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        >
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Main" component={MainTabs} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <AppProvider>
+        <NavigationContainer>
+          <Stack.Navigator
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.background },
+            }}
+          >
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Main" component={MainTabs} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </AppProvider>
     </SafeAreaProvider>
   );
 }

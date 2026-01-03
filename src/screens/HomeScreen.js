@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   RefreshControl,
@@ -12,69 +12,42 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { useApp } from '../context/AppContext';
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
 export default function HomeScreen({ navigation }) {
-  const [userData, setUserData] = useState(null);
+  const { 
+    userData, 
+    communications,
+    loading,
+    loadUserData,
+    loadCommunications,
+    refreshAll 
+  } = useApp();
+  
   const [refreshing, setRefreshing] = useState(false);
-  const [communications, setCommunications] = useState([]);
-  const [isLoading, setIsLoading] = useState(true); // 🔥 Nuovo stato per caricamento iniziale
 
-  // 🔥 UNIFICA IL CARICAMENTO: usa solo useFocusEffect
+  // ⚡ CARICA DATI SOLO AL PRIMO FOCUS O SE MANCANO
   useFocusEffect(
     useCallback(() => {
-      console.log('🔄 HomeScreen focus - ricarico dati');
-      loadAllData();
-    }, [])
+      console.log('🏠 HomeScreen focused');
+      
+      // Carica solo se non ci sono dati
+      if (!userData) {
+        loadUserData();
+      }
+      
+      if (communications.length === 0) {
+        loadCommunications();
+      }
+    }, []) // Empty deps - carica solo una volta
   );
 
-  const loadAllData = async (showLoader = true) => {
-    try {
-      if (showLoader) {
-        setRefreshing(true);
-        setIsLoading(true);
-      }
-      
-      const { email, code } = await ApiService.getSavedCredentials();
-      if (!email || !code) {
-        navigation.replace('Login');
-        return;
-      }
-
-      // 🔥 Carica tutto in parallelo
-      const [userDataResult, commsResult] = await Promise.all([
-        ApiService.refreshUserData(email, code, true),
-        ApiService.getCommunications()
-      ]);
-      
-      if (userDataResult.found) {
-        setUserData(userDataResult);
-        console.log('✅ Dati utente aggiornati:', {
-          isPaid: userDataResult.isPaid,
-          certificateExpired: userDataResult.certificateExpired,
-          bookings: userDataResult.bookings?.length || 0
-        });
-      } else {
-        Alert.alert('Errore', 'Impossibile caricare i dati utente');
-      }
-
-      if (Array.isArray(commsResult)) {
-        setCommunications(commsResult);
-      }
-      
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      if (showLoader) {
-        setRefreshing(false);
-        setIsLoading(false);
-      }
-    }
-  };
-
   const onRefresh = async () => {
-    await loadAllData(true);
+    setRefreshing(true);
+    await refreshAll();
+    setRefreshing(false);
   };
 
   const handleLogout = () => {
@@ -109,13 +82,12 @@ export default function HomeScreen({ navigation }) {
 
   const canBook = userData?.isPaid && !userData?.certificateExpired;
 
-  // 🔥 Controlla se mostrare l'alert
   const shouldShowStatusAlert = () => {
     return !userData?.isPaid || userData?.certificateExpired;
   };
 
-  // 🔥 Mostra loader durante il caricamento iniziale
- if (isLoading) {
+  // ⚡ Mostra loader solo se sta caricando E non ci sono dati
+  if (loading.userData && !userData) {
     return (
       <View style={[styles.container, styles.centerContent]}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -143,7 +115,7 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.userInfo}>
             <Text style={styles.greeting}>Ciao,</Text>
             <Text style={styles.userName}>
-              {userData?.nome}
+              {userData?.nome || 'Utente'}
             </Text>
           </View>
         </View>
@@ -198,7 +170,7 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
-      {/* Resto del codice rimane uguale... */}
+      {/* Status Grid - 4 Card */}
       <View style={styles.statusGrid}>
         {/* Abbonamento */}
         <View style={[styles.statusCardGrid, styles.halfCard]}>
@@ -281,7 +253,7 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Quick Actions */}
+      {/* Quick Actions - 2 Pulsanti Grandi */}
       <View style={styles.quickActions}>
         <TouchableOpacity
           style={[styles.actionCard, !canBook && styles.actionCardDisabled]}
@@ -313,7 +285,7 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Upcoming Bookings */}
+      {/* Prossime Prenotazioni */}
       {userData?.bookings && userData.bookings.length > 0 && (
         <View style={styles.bookingsSection}>
           <Text style={styles.sectionTitle}>Prossime Prenotazioni</Text>
@@ -339,7 +311,6 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-// Gli stili rimangono uguali...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -513,6 +484,7 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.error,
     marginTop: spacing.xs,
+    textAlign: 'center',
   },
   bookingsSection: {
     paddingHorizontal: spacing.lg,

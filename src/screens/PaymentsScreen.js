@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -11,61 +11,35 @@ import {
   RefreshControl,
   ScrollView,
 } from 'react-native';
-import ApiService from '../services/api';
+import { useApp } from '../context/AppContext';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
 export default function PaymentsScreen({ navigation }) {
-  const [paymentData, setPaymentData] = useState(null);
+  const { 
+    paymentData, 
+    loading, 
+    loadPayments 
+  } = useApp();
+  
   const [refreshing, setRefreshing] = useState(false);
-  const [lastChecked, setLastChecked] = useState(null);
-  const [initialLoading, setInitialLoading] = useState(true);
 
-  // ⚡ SMART REFRESH INTERVAL - Non ricarica se è recente
-  const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minuti
-
-  // ⚡ SMART FOCUS EFFECT - Ricarica SOLO se passati 5+ minuti
+  // ⚡ CARICA PAGAMENTI SOLO SE NECESSARIO
   useFocusEffect(
     useCallback(() => {
-      const shouldRefresh = !lastChecked || 
-        (Date.now() - lastChecked) > REFRESH_INTERVAL;
+      console.log('💳 PaymentsScreen focused');
       
-      if (shouldRefresh) {
-        console.log('🔄 Focus → Ricarica pagamenti (passati 5+ min)');
-        loadPaymentData(false);
-        setLastChecked(Date.now());
-      } else {
-        const minutesAgo = Math.floor((Date.now() - lastChecked) / 60000);
-        console.log(`⚡ Focus → Salta ricarica pagamenti (dati di ${minutesAgo} min fa)`);
+      // Carica solo se vuoti
+      if (!paymentData && !loading.payments) {
+        loadPayments();
       }
-    }, [lastChecked])
+    }, []) // Empty deps
   );
 
-  const loadPaymentData = async (showLoader = true) => {
-    try {
-      if (showLoader) setRefreshing(true);
-      
-      console.log('💰 Caricamento dati pagamento...');
-      const { email } = await ApiService.getSavedCredentials();
-      const result = await ApiService.getPaymentInfo(email);
-      console.log('✅ Risultato pagamento:', result);
-      
-      setPaymentData(result);
-      setLastChecked(Date.now());
-      setInitialLoading(false);
-    } catch (error) {
-      console.error('❌ Errore caricamento pagamento:', error);
-      setPaymentData({ success: false, hasPayment: false });
-      setInitialLoading(false);
-    } finally {
-      if (showLoader) setRefreshing(false);
-    }
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadPayments(true); // Force refresh
+    setRefreshing(false);
   };
-
-  // ⚡ INITIAL LOAD
-  useEffect(() => {
-    loadPaymentData(false);
-    setLastChecked(Date.now());
-  }, []);
 
   const handlePayment = async () => {
     if (!paymentData?.paymentLink) return;
@@ -86,8 +60,7 @@ export default function PaymentsScreen({ navigation }) {
               onPress: () => {
                 // Ricarica i dati dopo il pagamento (forza refresh)
                 setTimeout(() => {
-                  loadPaymentData(true);
-                  setLastChecked(Date.now());
+                  loadPayments(true);
                 }, 2000);
               }
             },
@@ -102,13 +75,8 @@ export default function PaymentsScreen({ navigation }) {
     }
   };
 
-  const onRefresh = () => {
-    loadPaymentData(true);
-    setLastChecked(Date.now());
-  };
-
   // ⚡ SKELETON LOADER per caricamento iniziale
-  if (initialLoading) {
+  if (loading.payments && !paymentData) {
     return (
       <ScrollView 
         style={styles.container}
@@ -139,7 +107,7 @@ export default function PaymentsScreen({ navigation }) {
         />
       }
     >
-      {/* Header con ultimo controllo */}
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>Pagamento</Text>
@@ -148,15 +116,9 @@ export default function PaymentsScreen({ navigation }) {
               name="refresh" 
               size={24} 
               color={colors.primary} 
-              style={refreshing && styles.refreshingIcon} 
             />
           </TouchableOpacity>
         </View>
-        {lastChecked && (
-          <Text style={styles.lastChecked}>
-            Ultimo controllo: {new Date(lastChecked).toLocaleTimeString()}
-          </Text>
-        )}
       </View>
 
       {!paymentData?.success ? (
@@ -244,17 +206,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...typography.h1,
   },
-  lastChecked: {
-    ...typography.caption,
-    color: colors.textTertiary,
-  },
   refreshButton: {
     padding: spacing.sm,
     backgroundColor: colors.cardBackground,
     borderRadius: borderRadius.round,
-  },
-  refreshingIcon: {
-    transform: [{ rotate: '180deg' }],
   },
   // ⚡ SKELETON STYLES
   skeletonCard: {

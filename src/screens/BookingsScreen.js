@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -11,7 +11,7 @@ import {
   View,
   ActivityIndicator,
 } from 'react-native';
-import ApiService from '../services/api';
+import { useApp } from '../context/AppContext';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
 // ⚡ SKELETON LOADER COMPONENT
@@ -29,63 +29,35 @@ function SkeletonCard() {
 }
 
 export default function BookingsScreen({ navigation }) {
-  const [bookings, setBookings] = useState([]);
+  const { 
+    bookings, 
+    loading, 
+    loadBookings, 
+    cancelBooking: contextCancelBooking 
+  } = useApp();
+  
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(null);
-  const [reloading, setReloading] = useState(false);
-  const [lastRefreshTime, setLastRefreshTime] = useState(null);
-  
-  // ⚡ SMART REFRESH INTERVAL - Non ricarica se è recente
-  const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minuti
+  const [optimisticDeletedIds, setOptimisticDeletedIds] = useState(new Set());
 
-  const loadBookings = async (showLoader = false, forceRefresh = false) => {
-    try {
-      if (showLoader) setReloading(true);
-      
-      const { email, code } = await ApiService.getSavedCredentials();
-      
-      // ⚡ Forza il refresh dei dati se richiesto
-      const userData = await ApiService.refreshUserData(email, code, forceRefresh);
-      
-      if (userData.found) {
-        setBookings(userData.bookings || []);
-        console.log('✅ Prenotazioni caricate:', userData.bookings?.length || 0);
-      }
-    } catch (_error) {
-      console.error('Error loading bookings');
-    } finally {
-      if (showLoader) setReloading(false);
-    }
-  };
-
-  // ⚡ SMART FOCUS EFFECT - Ricarica SOLO se passati 5+ minuti
+  // ⚡ CARICA BOOKINGS SOLO SE NECESSARIO
   useFocusEffect(
     useCallback(() => {
-      const shouldRefresh = !lastRefreshTime || 
-        (Date.now() - lastRefreshTime) > REFRESH_INTERVAL;
+      console.log('📖 BookingsScreen focused');
       
-      if (shouldRefresh) {
-        console.log('🔄 Focus → Ricarica prenotazioni (passati 5+ min)');
-        loadBookings(false, true);
-        setLastRefreshTime(Date.now());
-      } else {
-        const minutesAgo = Math.floor((Date.now() - lastRefreshTime) / 60000);
-        console.log(`⚡ Focus → Salta ricarica (dati di ${minutesAgo} min fa)`);
+      // Carica solo se vuoti
+      if (bookings.length === 0 && !loading.bookings) {
+        loadBookings();
       }
-    }, [lastRefreshTime])
+    }, []) // Empty deps
   );
-
-  // ⚡ INITIAL LOAD
-  useEffect(() => {
-    loadBookings();
-    setLastRefreshTime(Date.now());
-  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadBookings(false, true);
+    // Reset optimistic deletes
+    setOptimisticDeletedIds(new Set());
+    await loadBookings(true); // Force refresh
     setRefreshing(false);
-    setLastRefreshTime(Date.now());
   };
 
   const handleCancelBooking = (booking) => {
@@ -103,23 +75,61 @@ export default function BookingsScreen({ navigation }) {
     );
   };
 
+  // 🚀 OPTIMISTIC UPDATE - Cancellazione istantanea
   const confirmCancelBooking = async (booking) => {
     setCancelling(booking.id);
+    
     try {
-      const { email } = await ApiService.getSavedCredentials();
-      const result = await ApiService.cancelBooking(email, booking.id);
+      const { email } = await require('../services/api').default.getSavedCredentials();
       
-      if (result.success) {
-        Alert.alert('Successo ✅', result.message);
-        await loadBookings(true, true);
-        setLastRefreshTime(Date.now());
-      } else {
-        Alert.alert('Errore', result.message);
-      }
-    } catch (_error) {
-      Alert.alert('Errore', 'Impossibile cancellare la prenotazione');
-    } finally {
+      // 🚀 STEP 1: Rimuovi SUBITO dalla lista (Optimistic)
+      setOptimisticDeletedIds(prev => new Set([...prev, booking.id]));
       setCancelling(null);
+      
+      // 🚀 STEP 2: Mostra successo IMMEDIATAMENTE
+      Alert.alert('Prenotazione Cancellata ✅', 'La prenotazione è stata rimossa');
+      
+      // 🚀 STEP 3: API call in BACKGROUND (non bloccante)
+      contextCancelBooking(email, booking.id)
+        .then(result => {
+          console.log('✅ Cancellazione completata in background');
+          
+          if (!result.success) {
+            // ⚠️ Se fallisce, ripristina e notifica
+            setOptimisticDeletedIds(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(booking.id);
+              return newSet;
+            });
+            
+            Alert.alert(
+              'Errore',
+              result.message || 'Impossibile cancellare la prenotazione. È stata ripristinata.',
+              [{ text: 'OK' }]
+            );
+          }
+        })
+        .catch(error => {
+          console.error('❌ Errore cancellazione background:', error);
+          
+          // Ripristina la prenotazione
+          setOptimisticDeletedIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(booking.id);
+            return newSet;
+          });
+          
+          Alert.alert(
+            'Errore',
+            'Si è verificato un problema. La prenotazione è stata ripristinata.',
+            [{ text: 'OK' }]
+          );
+        });
+        
+    } catch (error) {
+      // Solo se fallisce PRIMA della chiamata API
+      setCancelling(null);
+      Alert.alert('Errore', 'Impossibile cancellare la prenotazione. Riprova.');
     }
   };
 
@@ -150,7 +160,7 @@ export default function BookingsScreen({ navigation }) {
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={() => handleCancelBooking(item)}
-          disabled={isCancelling || reloading}
+          disabled={isCancelling}
         >
           {isCancelling ? (
             <ActivityIndicator size="small" color={colors.error} />
@@ -164,10 +174,13 @@ export default function BookingsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     );
-  }, [cancelling, reloading]);
+  }, [cancelling]);
+
+  // 🚀 Filtra le prenotazioni cancellate ottimisticamente
+  const visibleBookings = bookings.filter(booking => !optimisticDeletedIds.has(booking.id));
 
   // Mostra skeleton durante il caricamento globale
-  if (reloading && bookings.length === 0) {
+  if (loading.bookings && bookings.length === 0) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -198,12 +211,12 @@ export default function BookingsScreen({ navigation }) {
       </View>
 
       <FlatList
-        data={bookings}
+        data={visibleBookings}
         renderItem={renderBooking}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.listContainer,
-          bookings.length === 0 && styles.emptyListContainer
+          visibleBookings.length === 0 && styles.emptyListContainer
         ]}
         refreshControl={
           <RefreshControl 
@@ -212,7 +225,6 @@ export default function BookingsScreen({ navigation }) {
             tintColor={colors.primary} 
           />
         }
-        // ⚡ FLATLIST OPTIMIZATIONS
         removeClippedSubviews={true}
         maxToRenderPerBatch={10}
         initialNumToRender={10}

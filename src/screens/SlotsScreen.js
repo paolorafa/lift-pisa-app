@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -11,65 +11,45 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import ApiService from '../services/api';
+import { useApp } from '../context/AppContext';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
 export default function SlotsScreen({ navigation, route }) {
   const { giorno, data, dataFormattata } = route.params || {};
   
-  const [slots, setSlots] = useState([]);
+  const { 
+    slots, 
+    loading, 
+    loadSlots, 
+    bookSlot: contextBookSlot 
+  } = useApp();
+  
   const [filteredSlots, setFilteredSlots] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [booking, setBooking] = useState(null);
-  const [lastRefreshTime, setLastRefreshTime] = useState(null);
 
-  // ⚡ SMART REFRESH INTERVAL
-  const REFRESH_INTERVAL = 3 * 60 * 1000; // 3 minuti (slot cambiano spesso)
-
-  useEffect(() => {
-    loadSlots();
-    setLastRefreshTime(Date.now());
-  }, [data]);
-
-  // ⚡ SMART FOCUS EFFECT - Ricarica se passati 3+ minuti
+  // ⚡ CARICA SLOTS SOLO SE NECESSARIO
   useFocusEffect(
     useCallback(() => {
-      const shouldRefresh = !lastRefreshTime || 
-        (Date.now() - lastRefreshTime) > REFRESH_INTERVAL;
+      console.log('📅 SlotsScreen focused');
       
-      if (shouldRefresh) {
-        console.log('🔄 Focus → Ricarica slot (passati 3+ min)');
+      // Carica solo se vuoti
+      if (slots.length === 0 && !loading.slots) {
         loadSlots();
-        setLastRefreshTime(Date.now());
-      } else {
-        console.log('⚡ Focus → Salta ricarica slot (dati recenti)');
       }
-    }, [lastRefreshTime])
+    }, []) // Empty deps
   );
 
+  // Filtra slots quando cambiano data o slots
   useEffect(() => {
     if (giorno && slots.length > 0) {
       filterSlotsByDay();
     }
   }, [giorno, slots]);
 
-  const loadSlots = async () => {
-    try {
-      setLoading(true);
-      const dataSlots = await ApiService.getAvailableSlots(data);
-      setSlots(dataSlots);
-    } catch (error) {
-      Alert.alert('Errore', error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadSlots();
-    setLastRefreshTime(Date.now());
+    await loadSlots(true); // Force refresh
     setRefreshing(false);
   };
 
@@ -120,14 +100,14 @@ export default function SlotsScreen({ navigation, route }) {
       });
 
     setFilteredSlots(filtered);
-  }, [giorno, slots, data, extractSlotInfo]);
+  }, [giorno, slots, data]);
 
   const handleBookSlot = useCallback((slot) => {
     const slotInfo = extractSlotInfo(slot.Descrizione);
     
     Alert.alert(
       'Conferma Prenotazione',
-      `Vuoi prenotare per:\n📅 ${slotInfo.date}\n🕒 ${slot.Ora_Inizio} - ${slot.Ora_Fine}\n\nPosti disponibili: ${slotInfo.available}/8`,
+      `Vuoi prenotare per:\n📅 ${slotInfo.date}\n🕐 ${slot.Ora_Inizio} - ${slot.Ora_Fine}\n\nPosti disponibili: ${slotInfo.available}/8`,
       [
         { text: 'Annulla', style: 'cancel' },
         {
@@ -138,34 +118,48 @@ export default function SlotsScreen({ navigation, route }) {
     );
   }, [extractSlotInfo]);
 
+  // 🚀 OPTIMISTIC UPDATE - Prenotazione istantanea
   const confirmBooking = async (slot) => {
     setBooking(slot.ID_Spazio);
+    
     try {
-      const { email, code } = await ApiService.getSavedCredentials();
-      const result = await ApiService.bookSlot(email, code, slot.ID_Spazio, data);
+      const { email, code } = await require('../services/api').default.getSavedCredentials();
       
-      if (result.success) {
-        Alert.alert(
-          'Prenotazione Confermata! ✅',
-          result.message,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                loadSlots();
-                setBooking(null);
-                setLastRefreshTime(Date.now());
-              },
-            },
-          ]
-        );
-      } else {
-        Alert.alert('Errore', result.message);
-        setBooking(null);
-      }
-    } catch (error) {
-      Alert.alert('Errore', error.message);
+      // 🚀 STEP 1: Mostra successo IMMEDIATAMENTE (Optimistic)
       setBooking(null);
+      Alert.alert(
+        'Prenotazione Confermata! ✅',
+        'La tua prenotazione è stata registrata',
+        [{ text: 'OK' }]
+      );
+      
+      // 🚀 STEP 2: API call in BACKGROUND (non bloccante)
+      contextBookSlot(email, code, slot.ID_Spazio, data)
+        .then(result => {
+          console.log('✅ Prenotazione completata in background');
+          
+          if (!result.success) {
+            // ⚠️ Se fallisce, notifica l'utente
+            Alert.alert(
+              'Attenzione',
+              result.message || 'C\'è stato un problema con la prenotazione. Controlla le tue prenotazioni.',
+              [{ text: 'OK' }]
+            );
+          }
+        })
+        .catch(error => {
+          console.error('❌ Errore prenotazione background:', error);
+          Alert.alert(
+            'Errore',
+            'Si è verificato un problema. Controlla le tue prenotazioni per verificare.',
+            [{ text: 'OK' }]
+          );
+        });
+        
+    } catch (error) {
+      // Solo se fallisce PRIMA della chiamata API
+      setBooking(null);
+      Alert.alert('Errore', 'Impossibile effettuare la prenotazione. Riprova.');
     }
   };
 
@@ -222,7 +216,7 @@ export default function SlotsScreen({ navigation, route }) {
     );
   }, [booking, getSlotStatus, extractSlotInfo, handleBookSlot]);
 
-  if (loading) {
+  if (loading.slots && slots.length === 0) {
     return (
       <View style={[styles.container, styles.centerContent]}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -252,7 +246,7 @@ export default function SlotsScreen({ navigation, route }) {
         </View>
       )}
 
-      {/* Slots List con optimizzazioni */}
+      {/* Slots List */}
       <FlatList
         data={filteredSlots}
         renderItem={renderSlot}
@@ -261,7 +255,6 @@ export default function SlotsScreen({ navigation, route }) {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
-        // ⚡ FLATLIST OPTIMIZATIONS
         removeClippedSubviews={true}
         maxToRenderPerBatch={10}
         initialNumToRender={10}
