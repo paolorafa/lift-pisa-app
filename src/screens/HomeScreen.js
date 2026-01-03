@@ -136,7 +136,7 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Image 
-            source={require('../../assets/lift-logo.png')} 
+            source={require('../../assets/icona.png')} 
             style={styles.logo}
             resizeMode="contain"
           />

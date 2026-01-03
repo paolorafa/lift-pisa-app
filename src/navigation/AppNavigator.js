@@ -7,7 +7,6 @@ import { useEffect, useState, useRef } from 'react';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../styles/theme';
 import ApiService from '../services/api';
-import * as Updates from 'expo-updates'; // 🔥 Importa expo-updates
 
 // Screens
 import BookingsScreen from '../screens/BookingsScreen';
@@ -115,108 +114,46 @@ function AnimatedBellIcon({ color, size, hasNotification }) {
   );
 }
 
-// 🔄 Componente Icona Aggiornamenti con Notifica
-function AnimatedUpdateIcon({ color, size, hasUpdate }) {
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (hasUpdate) {
-      // Animazione rotazione continua
-      Animated.loop(
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        })
-      ).start();
-
-      // Animazione pulsante per il badge
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.3,
-            duration: 500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 500,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    } else {
-      rotateAnim.setValue(0);
-      pulseAnim.setValue(1);
-    }
-  }, [hasUpdate]);
-
-  const rotateStyle = {
-    transform: [
-      { 
-        rotate: rotateAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: ['0deg', '360deg']
-        })
-      }
-    ]
-  };
-
-  const pulseStyle = {
-    transform: [{ scale: pulseAnim }]
-  };
-
-  return (
-    <View style={styles.iconContainer}>
-      <Animated.View style={hasUpdate ? rotateStyle : null}>
-        <MaterialCommunityIcons 
-          name={hasUpdate ? "update" : "information"} 
-          size={size} 
-          color={color} 
-        />
-      </Animated.View>
-      
-      {hasUpdate && (
-        <Animated.View style={[styles.updateBadge, pulseStyle]}>
-          <Text style={styles.badgeText}>!</Text>
-        </Animated.View>
-      )}
-    </View>
-  );
-}
-
-// 🔥 FUNZIONE: Confronta versioni (es: "1.0.2" vs "1.0.3")
-function compareVersions(currentVersion, latestVersion) {
-  if (!currentVersion || !latestVersion) return false;
-  
-  try {
-    const currentParts = currentVersion.split('.').map(Number);
-    const latestParts = latestVersion.split('.').map(Number);
-    
-    // Confronta major, minor, patch
-    for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
-      const currentPart = currentParts[i] || 0;
-      const latestPart = latestParts[i] || 0;
-      
-      if (latestPart > currentPart) {
-        return true; // Nuova versione disponibile
-      } else if (latestPart < currentPart) {
-        return false; // Versione corrente è più nuova
-      }
-    }
-    
-    return false; // Versioni uguali
-  } catch (error) {
-    console.error('Errore nel confronto versioni:', error);
-    return false;
-  }
-}
-
 function MainTabs() {
   const insets = useSafeAreaInsets();
   const [hasPendingPayment, setHasPendingPayment] = useState(false);
-  const [hasNewUpdate, setHasNewUpdate] = useState(false);
+  const [lastPreloadTime, setLastPreloadTime] = useState(null);
+
+  // ⚡ PRECACHING - Carica dati in background
+  const preloadData = async () => {
+    try {
+      console.log('⚡ Preload: Caricamento dati in background...');
+      
+      const { email } = await ApiService.getSavedCredentials();
+      
+      // Carica tutti i dati in parallelo
+      await Promise.all([
+        ApiService.getAvailableSlots(),      // Cache slot
+        ApiService.getCommunications(),       // Cache comunicazioni
+        email ? ApiService.getPaymentInfo(email) : null, // Cache pagamenti
+      ]);
+      
+      console.log('✅ Preload: Completato');
+    } catch (error) {
+      console.log('⚠️ Preload fallito (non critico):', error.message);
+      // Non bloccare l'app se il preload fallisce
+    }
+  };
+
+  // ⚡ SMART PRECACHING - Esegui preload periodicamente
+  useEffect(() => {
+    // Preload immediato al mount
+    preloadData();
+    setLastPreloadTime(Date.now());
+
+    // Preload ogni 10 minuti
+    const preloadInterval = setInterval(() => {
+      preloadData();
+      setLastPreloadTime(Date.now());
+    }, 10 * 60 * 1000);
+
+    return () => clearInterval(preloadInterval);
+  }, []);
 
   const checkForPayments = async () => {
     try {
@@ -319,7 +256,7 @@ function MainTabs() {
   );
 }
 
-// Stili (rimangono uguali)
+// Stili
 const styles = StyleSheet.create({
   iconContainer: {
     position: 'relative',
@@ -329,20 +266,6 @@ const styles = StyleSheet.create({
     top: -4,
     right: -6,
     backgroundColor: colors.error,
-    borderRadius: 8,
-    width: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.backgroundLight,
-    zIndex: 1,
-  },
-  updateBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -6,
-    backgroundColor: colors.warning,
     borderRadius: 8,
     width: 16,
     height: 16,

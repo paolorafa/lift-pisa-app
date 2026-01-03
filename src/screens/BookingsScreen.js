@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -13,15 +14,29 @@ import {
 import ApiService from '../services/api';
 import { borderRadius, colors, spacing, typography } from '../styles/theme';
 
+// ⚡ SKELETON LOADER COMPONENT
+function SkeletonCard() {
+  return (
+    <View style={styles.bookingCard}>
+      <View style={styles.skeletonIcon} />
+      <View style={{ flex: 1 }}>
+        <View style={styles.skeletonText} />
+        <View style={[styles.skeletonText, { width: '80%' }]} />
+      </View>
+      <View style={[styles.skeletonIcon, { width: 40, height: 40 }]} />
+    </View>
+  );
+}
+
 export default function BookingsScreen({ navigation }) {
   const [bookings, setBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(null);
   const [reloading, setReloading] = useState(false);
-
-  useEffect(() => {
-    loadBookings();
-  }, []);
+  const [lastRefreshTime, setLastRefreshTime] = useState(null);
+  
+  // ⚡ SMART REFRESH INTERVAL - Non ricarica se è recente
+  const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minuti
 
   const loadBookings = async (showLoader = false, forceRefresh = false) => {
     try {
@@ -29,11 +44,12 @@ export default function BookingsScreen({ navigation }) {
       
       const { email, code } = await ApiService.getSavedCredentials();
       
-      // ⚡ MODIFICA: Forza il refresh dei dati
+      // ⚡ Forza il refresh dei dati se richiesto
       const userData = await ApiService.refreshUserData(email, code, forceRefresh);
       
       if (userData.found) {
         setBookings(userData.bookings || []);
+        console.log('✅ Prenotazioni caricate:', userData.bookings?.length || 0);
       }
     } catch (_error) {
       console.error('Error loading bookings');
@@ -42,10 +58,34 @@ export default function BookingsScreen({ navigation }) {
     }
   };
 
+  // ⚡ SMART FOCUS EFFECT - Ricarica SOLO se passati 5+ minuti
+  useFocusEffect(
+    useCallback(() => {
+      const shouldRefresh = !lastRefreshTime || 
+        (Date.now() - lastRefreshTime) > REFRESH_INTERVAL;
+      
+      if (shouldRefresh) {
+        console.log('🔄 Focus → Ricarica prenotazioni (passati 5+ min)');
+        loadBookings(false, true);
+        setLastRefreshTime(Date.now());
+      } else {
+        const minutesAgo = Math.floor((Date.now() - lastRefreshTime) / 60000);
+        console.log(`⚡ Focus → Salta ricarica (dati di ${minutesAgo} min fa)`);
+      }
+    }, [lastRefreshTime])
+  );
+
+  // ⚡ INITIAL LOAD
+  useEffect(() => {
+    loadBookings();
+    setLastRefreshTime(Date.now());
+  }, []);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadBookings(false, true); // ⚡ Forza refresh
+    await loadBookings(false, true);
     setRefreshing(false);
+    setLastRefreshTime(Date.now());
   };
 
   const handleCancelBooking = (booking) => {
@@ -71,8 +111,8 @@ export default function BookingsScreen({ navigation }) {
       
       if (result.success) {
         Alert.alert('Successo ✅', result.message);
-        // ⚡ MODIFICA: Forza il refresh completo
         await loadBookings(true, true);
+        setLastRefreshTime(Date.now());
       } else {
         Alert.alert('Errore', result.message);
       }
@@ -91,7 +131,8 @@ export default function BookingsScreen({ navigation }) {
     return 'dumbbell';
   };
 
-  const renderBooking = ({ item }) => {
+  // ⚡ MEMOIZZATO - Evita re-render inutili
+  const renderBooking = useCallback(({ item }) => {
     const isCancelling = cancelling === item.id;
     const icon = getActivityIcon(item.slotDescription);
 
@@ -123,10 +164,10 @@ export default function BookingsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     );
-  };
+  }, [cancelling, reloading]);
 
-  // Mostra loader globale durante il ricaricamento
-  if (reloading) {
+  // Mostra skeleton durante il caricamento globale
+  if (reloading && bookings.length === 0) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -136,9 +177,11 @@ export default function BookingsScreen({ navigation }) {
           <Text style={styles.headerTitle}>Le Tue Prenotazioni</Text>
           <View style={{ width: 28 }} />
         </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Aggiornamento prenotazioni...</Text>
+        <View style={styles.listContainer}>
+          {/* ⚡ SKELETON LOADING */}
+          {Array(3).fill(0).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
         </View>
       </View>
     );
@@ -160,7 +203,7 @@ export default function BookingsScreen({ navigation }) {
         keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.listContainer,
-          bookings.length === 0 && styles.emptyListContainer // ⚡ AGGIUNTA
+          bookings.length === 0 && styles.emptyListContainer
         ]}
         refreshControl={
           <RefreshControl 
@@ -169,6 +212,11 @@ export default function BookingsScreen({ navigation }) {
             tintColor={colors.primary} 
           />
         }
+        // ⚡ FLATLIST OPTIMIZATIONS
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        initialNumToRender={10}
+        updateCellsBatchingPeriod={50}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="calendar-remove" size={64} color={colors.textTertiary} />
@@ -208,10 +256,23 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     flexGrow: 1,
   },
-  // ⚡ AGGIUNTA: Stile per lista vuota
   emptyListContainer: {
     flexGrow: 1,
     justifyContent: 'center',
+  },
+  // ⚡ SKELETON STYLES
+  skeletonIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundLight,
+    marginRight: spacing.md,
+  },
+  skeletonText: {
+    height: 16,
+    backgroundColor: colors.backgroundLight,
+    borderRadius: 8,
+    marginBottom: spacing.xs,
   },
   bookingCard: {
     flexDirection: 'row',
@@ -271,15 +332,5 @@ const styles = StyleSheet.create({
   bookNowButtonText: {
     ...typography.h3,
     fontWeight: 'bold',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
   },
 });

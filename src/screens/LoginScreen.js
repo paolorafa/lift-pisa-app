@@ -158,7 +158,7 @@ export default function LoginScreen({ navigation }) {
           {/* Header con logo - Ridotto quando tastiera è visibile */}
           <View style={[styles.header, keyboardVisible && styles.headerKeyboard]}>
             <Image 
-              source={require('../../assets/lift-logo.png')} 
+              source={require('../../assets/icona.png')} 
               style={[styles.logo, keyboardVisible && styles.logoKeyboard]}
               resizeMode="contain"
             />

@@ -18,16 +18,24 @@ export default function PaymentsScreen({ navigation }) {
   const [paymentData, setPaymentData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastChecked, setLastChecked] = useState(null);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  // 🔄 Ricarica quando la schermata diventa visibile (massimo ogni 10 minuti)
+  // ⚡ SMART REFRESH INTERVAL - Non ricarica se è recente
+  const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minuti
+
+  // ⚡ SMART FOCUS EFFECT - Ricarica SOLO se passati 5+ minuti
   useFocusEffect(
     useCallback(() => {
       const shouldRefresh = !lastChecked || 
-        (new Date() - lastChecked) > 10 * 60 * 1000; // 10 minuti
+        (Date.now() - lastChecked) > REFRESH_INTERVAL;
       
       if (shouldRefresh) {
-        console.log('🔄 PaymentsScreen focus - ricarico dati pagamento');
+        console.log('🔄 Focus → Ricarica pagamenti (passati 5+ min)');
         loadPaymentData(false);
+        setLastChecked(Date.now());
+      } else {
+        const minutesAgo = Math.floor((Date.now() - lastChecked) / 60000);
+        console.log(`⚡ Focus → Salta ricarica pagamenti (dati di ${minutesAgo} min fa)`);
       }
     }, [lastChecked])
   );
@@ -36,20 +44,28 @@ export default function PaymentsScreen({ navigation }) {
     try {
       if (showLoader) setRefreshing(true);
       
-      console.log('🔄 Caricamento dati pagamento...');
+      console.log('💰 Caricamento dati pagamento...');
       const { email } = await ApiService.getSavedCredentials();
       const result = await ApiService.getPaymentInfo(email);
-      console.log('💰 Risultato pagamento:', result);
+      console.log('✅ Risultato pagamento:', result);
       
       setPaymentData(result);
-      setLastChecked(new Date());
+      setLastChecked(Date.now());
+      setInitialLoading(false);
     } catch (error) {
       console.error('❌ Errore caricamento pagamento:', error);
       setPaymentData({ success: false, hasPayment: false });
+      setInitialLoading(false);
     } finally {
       if (showLoader) setRefreshing(false);
     }
   };
+
+  // ⚡ INITIAL LOAD
+  useEffect(() => {
+    loadPaymentData(false);
+    setLastChecked(Date.now());
+  }, []);
 
   const handlePayment = async () => {
     if (!paymentData?.paymentLink) return;
@@ -61,7 +77,6 @@ export default function PaymentsScreen({ navigation }) {
       if (supported) {
         await Linking.openURL(paymentData.paymentLink);
         
-        // Mostra un avviso
         Alert.alert(
           'Pagamento Avviato',
           'Completa il pagamento nella pagina che si è aperta.\n\nTorna qui dopo aver completato.',
@@ -69,8 +84,11 @@ export default function PaymentsScreen({ navigation }) {
             { 
               text: 'Ho Completato', 
               onPress: () => {
-                // Ricarica i dati dopo il pagamento
-                setTimeout(() => loadPaymentData(true), 2000);
+                // Ricarica i dati dopo il pagamento (forza refresh)
+                setTimeout(() => {
+                  loadPaymentData(true);
+                  setLastChecked(Date.now());
+                }, 2000);
               }
             },
             { text: 'Annulla', style: 'cancel' }
@@ -86,14 +104,26 @@ export default function PaymentsScreen({ navigation }) {
 
   const onRefresh = () => {
     loadPaymentData(true);
+    setLastChecked(Date.now());
   };
 
-  if (!paymentData && refreshing) {
+  // ⚡ SKELETON LOADER per caricamento iniziale
+  if (initialLoading) {
     return (
-      <View style={[styles.container, styles.centerContent]}>
-        <MaterialCommunityIcons name="loading" size={48} color={colors.primary} />
-        <Text style={styles.loadingText}>Caricamento pagamento...</Text>
-      </View>
+      <ScrollView 
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Pagamento</Text>
+        </View>
+        
+        <View style={[styles.paymentCard, styles.skeletonCard]}>
+          <View style={styles.skeletonIcon} />
+          <View style={styles.skeletonText} />
+          <View style={[styles.skeletonText, { width: '70%' }]} />
+        </View>
+      </ScrollView>
     );
   }
 
@@ -124,7 +154,7 @@ export default function PaymentsScreen({ navigation }) {
         </View>
         {lastChecked && (
           <Text style={styles.lastChecked}>
-            Ultimo controllo: {lastChecked.toLocaleTimeString()}
+            Ultimo controllo: {new Date(lastChecked).toLocaleTimeString()}
           </Text>
         )}
       </View>
@@ -202,10 +232,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
   },
-  centerContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   header: {
     paddingVertical: spacing.lg,
   },
@@ -229,6 +255,24 @@ const styles = StyleSheet.create({
   },
   refreshingIcon: {
     transform: [{ rotate: '180deg' }],
+  },
+  // ⚡ SKELETON STYLES
+  skeletonCard: {
+    justifyContent: 'flex-start',
+    paddingTop: spacing.lg,
+  },
+  skeletonIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundLight,
+    marginBottom: spacing.lg,
+  },
+  skeletonText: {
+    height: 16,
+    backgroundColor: colors.backgroundLight,
+    borderRadius: 8,
+    marginBottom: spacing.md,
   },
   paymentCard: {
     backgroundColor: colors.cardBackground,
@@ -369,33 +413,5 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginLeft: spacing.sm,
     fontWeight: '600',
-  },
-  infoCard: {
-    backgroundColor: colors.cardBackground,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  infoTitle: {
-    ...typography.h3,
-    marginBottom: spacing.md,
-    color: colors.textSecondary,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  infoText: {
-    ...typography.bodySmall,
-    color: colors.textPrimary,
-    marginLeft: spacing.sm,
-    flex: 1,
-  },
-  loadingText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
   },
 });

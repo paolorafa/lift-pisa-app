@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -21,10 +22,31 @@ export default function SlotsScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [booking, setBooking] = useState(null);
+  const [lastRefreshTime, setLastRefreshTime] = useState(null);
+
+  // ⚡ SMART REFRESH INTERVAL
+  const REFRESH_INTERVAL = 3 * 60 * 1000; // 3 minuti (slot cambiano spesso)
 
   useEffect(() => {
     loadSlots();
-  }, [data]); // ⚡ AGGIUNTA: Ricarica quando cambia la data
+    setLastRefreshTime(Date.now());
+  }, [data]);
+
+  // ⚡ SMART FOCUS EFFECT - Ricarica se passati 3+ minuti
+  useFocusEffect(
+    useCallback(() => {
+      const shouldRefresh = !lastRefreshTime || 
+        (Date.now() - lastRefreshTime) > REFRESH_INTERVAL;
+      
+      if (shouldRefresh) {
+        console.log('🔄 Focus → Ricarica slot (passati 3+ min)');
+        loadSlots();
+        setLastRefreshTime(Date.now());
+      } else {
+        console.log('⚡ Focus → Salta ricarica slot (dati recenti)');
+      }
+    }, [lastRefreshTime])
+  );
 
   useEffect(() => {
     if (giorno && slots.length > 0) {
@@ -35,7 +57,6 @@ export default function SlotsScreen({ navigation, route }) {
   const loadSlots = async () => {
     try {
       setLoading(true);
-      // ⚡ MODIFICA: Passa la data specifica al backend
       const dataSlots = await ApiService.getAvailableSlots(data);
       setSlots(dataSlots);
     } catch (error) {
@@ -48,66 +69,65 @@ export default function SlotsScreen({ navigation, route }) {
   const onRefresh = async () => {
     setRefreshing(true);
     await loadSlots();
+    setLastRefreshTime(Date.now());
     setRefreshing(false);
   };
 
-  const filterSlotsByDay = () => {
-  if (!giorno) {
-    setFilteredSlots(slots);
-    return;
-  }
-  
-  const today = new Date();
-  const isToday = data === today.toISOString().split("T")[0];
-
-  const filtered = slots
-    .filter(slot => slot.Giorno === giorno)
-    .filter(slot => {
-      if (!isToday) return true; // Giorni futuri → nessun filtro
-
-      // Giorno di oggi → controlla se lo slot è già PASSATO
-      const nowMinutes = today.getHours() * 60 + today.getMinutes();
-      const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
-      const slotMinutes = startHour * 60 + startMin;
-
-      // ⚡ MODIFICA: Controlla se lo slot è già PASSATO
-      if (slotMinutes < nowMinutes) {
-        return false; // ❌ Slot già passato, non mostrare
-      }
-
-      // ⚡ MODIFICA: Controllo "2 ore prima" solo per slot FUTURI
-      const minAllowedMinutes = nowMinutes + 120; // +2 ore
-      return slotMinutes >= minAllowedMinutes;
-    });
-
-  setFilteredSlots(filtered);
-};
-
-  // ⚡ NUOVA FUNZIONE: Estrae la data dalla descrizione
-  const extractDateFromDescription = (description) => {
+  // ⚡ MEMOIZZATO - Estrae data dalla descrizione
+  const extractDateFromDescription = useCallback((description) => {
     const dateMatch = description.match(/\((.*?)\)/);
     return dateMatch ? dateMatch[1] : 'Data non disponibile';
-  };
+  }, []);
 
-  // ⚡ NUOVA FUNZIONE: Estrae info slot dalla descrizione
-  const extractSlotInfo = (description) => {
+  // ⚡ MEMOIZZATO - Estrae info slot
+  const extractSlotInfo = useCallback((description) => {
     const countMatch = description.match(/(\d+)\/8/);
     const currentCount = countMatch ? parseInt(countMatch[1]) : 0;
-    const date = extractDateFromDescription(description);
+    const dateStr = extractDateFromDescription(description);
     
     return {
       currentCount,
       available: 8 - currentCount,
-      date
+      date: dateStr
     };
-  };
+  }, [extractDateFromDescription]);
 
-  const handleBookSlot = (slot) => {
+  // ⚡ MEMOIZZATO - Filtra slot per giorno
+  const filterSlotsByDay = useCallback(() => {
+    if (!giorno) {
+      setFilteredSlots(slots);
+      return;
+    }
+    
+    const today = new Date();
+    const isToday = data === today.toISOString().split("T")[0];
+
+    const filtered = slots
+      .filter(slot => slot.Giorno === giorno)
+      .filter(slot => {
+        if (!isToday) return true;
+
+        const nowMinutes = today.getHours() * 60 + today.getMinutes();
+        const [startHour, startMin] = slot.Ora_Inizio.split(":").map(Number);
+        const slotMinutes = startHour * 60 + startMin;
+
+        if (slotMinutes < nowMinutes) {
+          return false;
+        }
+
+        const minAllowedMinutes = nowMinutes + 120;
+        return slotMinutes >= minAllowedMinutes;
+      });
+
+    setFilteredSlots(filtered);
+  }, [giorno, slots, data, extractSlotInfo]);
+
+  const handleBookSlot = useCallback((slot) => {
     const slotInfo = extractSlotInfo(slot.Descrizione);
     
     Alert.alert(
       'Conferma Prenotazione',
-      `Vuoi prenotare per:\n📅 ${slotInfo.date}\n🕐 ${slot.Ora_Inizio} - ${slot.Ora_Fine}\n\nPosti disponibili: ${slotInfo.available}/8`,
+      `Vuoi prenotare per:\n📅 ${slotInfo.date}\n🕒 ${slot.Ora_Inizio} - ${slot.Ora_Fine}\n\nPosti disponibili: ${slotInfo.available}/8`,
       [
         { text: 'Annulla', style: 'cancel' },
         {
@@ -116,41 +136,41 @@ export default function SlotsScreen({ navigation, route }) {
         },
       ]
     );
-  };
+  }, [extractSlotInfo]);
 
   const confirmBooking = async (slot) => {
-  setBooking(slot.ID_Spazio);
-  try {
-    const { email, code } = await ApiService.getSavedCredentials();
-    // ⚡ MODIFICA: Passa la data specifica alla prenotazione
-    const result = await ApiService.bookSlot(email, code, slot.ID_Spazio, data);
-    
-    if (result.success) {
-      Alert.alert(
-        'Prenotazione Confermata! ✅',
-        result.message,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // ⚡ MODIFICA: Rimani nella schermata e ricarica gli slot
-              loadSlots(); // Ricarica gli slot aggiornati
-              setBooking(null);
+    setBooking(slot.ID_Spazio);
+    try {
+      const { email, code } = await ApiService.getSavedCredentials();
+      const result = await ApiService.bookSlot(email, code, slot.ID_Spazio, data);
+      
+      if (result.success) {
+        Alert.alert(
+          'Prenotazione Confermata! ✅',
+          result.message,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                loadSlots();
+                setBooking(null);
+                setLastRefreshTime(Date.now());
+              },
             },
-          },
-        ]
-      );
-    } else {
-      Alert.alert('Errore', result.message);
+          ]
+        );
+      } else {
+        Alert.alert('Errore', result.message);
+        setBooking(null);
+      }
+    } catch (error) {
+      Alert.alert('Errore', error.message);
       setBooking(null);
     }
-  } catch (error) {
-    Alert.alert('Errore', error.message);
-    setBooking(null);
-  }
-};
+  };
 
-  const getSlotStatus = (description) => {
+  // ⚡ MEMOIZZATO - Calcola status slot
+  const getSlotStatus = useCallback((description) => {
     const slotInfo = extractSlotInfo(description);
     
     if (slotInfo.available <= 0) {
@@ -159,16 +179,16 @@ export default function SlotsScreen({ navigation, route }) {
       return { color: colors.warning, text: `Solo ${slotInfo.available} posto${slotInfo.available === 1 ? '' : 'i'}!` };
     }
     return { color: colors.success, text: `${slotInfo.available} posti disponibili` };
-  };
+  }, [extractSlotInfo]);
 
-  const renderSlot = ({ item }) => {
+  // ⚡ MEMOIZZATO - Render slot (Evita re-render)
+  const renderSlot = useCallback(({ item }) => {
     const status = getSlotStatus(item.Descrizione);
     const slotInfo = extractSlotInfo(item.Descrizione);
     const isBooking = booking === item.ID_Spazio;
 
     return (
       <View style={styles.slotCard}>
-        
         <View style={styles.slotDetails}>
           <Text style={styles.slotTime}>
             {item.Ora_Inizio} - {item.Ora_Fine}
@@ -200,7 +220,7 @@ export default function SlotsScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
     );
-  };
+  }, [booking, getSlotStatus, extractSlotInfo, handleBookSlot]);
 
   if (loading) {
     return (
@@ -232,7 +252,7 @@ export default function SlotsScreen({ navigation, route }) {
         </View>
       )}
 
-      {/* Slots List */}
+      {/* Slots List con optimizzazioni */}
       <FlatList
         data={filteredSlots}
         renderItem={renderSlot}
@@ -241,6 +261,11 @@ export default function SlotsScreen({ navigation, route }) {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
+        // ⚡ FLATLIST OPTIMIZATIONS
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        initialNumToRender={10}
+        updateCellsBatchingPeriod={50}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <MaterialCommunityIcons name="calendar-remove" size={64} color={colors.textTertiary} />
@@ -303,15 +328,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-  },
-  slotIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.backgroundLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
   },
   slotDetails: {
     flex: 1,

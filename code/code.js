@@ -321,9 +321,13 @@ function bookSlot(email, slotId, clientId = null, targetDate = null) {
     if(clientData.abbonamentoExpired) {
       return {success: false, message: clientData.message || "⚠️ Non puoi prenotare: abbonamento scaduto."};
     }
+  
+    if(clientData.asiExpired) {
+      return {success: false, message: clientData.message || "⚠️ Tessera Asi scaduta. Chiedi al personale per il rinnovo della tessera"};
+    }
     
     if(clientData.certificateExpired) {
-      return {success: false, message: "Certificato medico scaduto"};
+      return {success: false, message: "⚠️ Certificato medico scaduto"};
     }
 
     const sm = new SpreadsheetManager();
